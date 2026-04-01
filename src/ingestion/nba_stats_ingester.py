@@ -249,8 +249,8 @@ async def ingest_season_averages() -> None:
         partial(
             LeagueDashPlayerStats,
             season=CURRENT_SEASON,
-            per_mode_simple="PerGame",
-            measure_type_simple="Base",
+            per_mode_detailed="PerGame",
+            measure_type_detailed_defense="Base",
         ),
     )
     rows = endpoint.get_normalized_dict()["LeagueDashPlayerStats"]

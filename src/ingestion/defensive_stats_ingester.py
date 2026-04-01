@@ -109,8 +109,8 @@ async def _fetch_opponent_stats() -> list[dict]:
         partial(
             LeagueDashTeamStats,
             season=CURRENT_SEASON,
-            measure_type_simple="Opponent",
-            per_mode_simple="PerGame",
+            measure_type_detailed_defense="Opponent",
+            per_mode_detailed="PerGame",
         ),
     )
     return endpoint.get_normalized_dict()["LeagueDashTeamStats"]
@@ -125,8 +125,8 @@ async def _fetch_advanced_stats() -> list[dict]:
         partial(
             LeagueDashTeamStats,
             season=CURRENT_SEASON,
-            measure_type_simple="Advanced",
-            per_mode_simple="PerGame",
+            measure_type_detailed_defense="Advanced",
+            per_mode_detailed="PerGame",
         ),
     )
     return endpoint.get_normalized_dict()["LeagueDashTeamStats"]

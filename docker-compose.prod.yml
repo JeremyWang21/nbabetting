@@ -1,0 +1,24 @@
+# Overrides for production (AWS RDS + ElastiCache).
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+version: "3.9"
+
+services:
+  app:
+    # No volume mounts in prod — use the baked image
+    volumes: []
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 1
+    environment:
+      # These override .env — set real values in ECS task definition secrets
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      ODDS_API_KEY: ${ODDS_API_KEY}
+      TANK01_API_KEY: ${TANK01_API_KEY}
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+
+  # No postgres / redis services in prod — use RDS and ElastiCache instead
+  postgres:
+    profiles: ["disabled"]
+
+  redis:
+    profiles: ["disabled"]

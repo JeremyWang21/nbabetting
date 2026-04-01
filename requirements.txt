@@ -1,0 +1,30 @@
+# Web framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+
+# Database
+sqlalchemy[asyncio]>=2.0.0
+asyncpg>=0.30.0
+alembic>=1.14.0
+
+# Cache
+redis[hiredis]>=5.2.0
+
+# Settings / validation
+pydantic>=2.11.0
+pydantic-settings>=2.7.0
+
+# HTTP client (used by injury ingester + utils)
+httpx>=0.28.0
+
+# Scheduler — use stable 3.x; 4.x has an entirely different API
+apscheduler>=3.10.4
+
+# NBA stats (unofficial stats.nba.com wrapper)
+nba-api>=1.4.0
+
+# Injury PDF parsing
+pdfplumber>=0.11.0
+
+# Environment
+python-dotenv>=1.0.0

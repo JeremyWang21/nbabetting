@@ -1,0 +1,11 @@
+-r requirements.txt
+
+# Testing
+pytest>=8.3.0
+pytest-asyncio>=0.25.0
+httpx>=0.28.0
+
+# Linting / formatting
+black>=25.1.0
+ruff>=0.9.0
+mypy>=1.14.0

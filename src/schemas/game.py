@@ -19,13 +19,17 @@ class GameResponse(BaseModel):
     game_date: date
     home_team_id: int
     away_team_id: int
+    home_team_abbr: str | None = None
+    away_team_abbr: str | None = None
+    home_team_name: str | None = None
+    away_team_name: str | None = None
     status: str
     home_score: int | None
     away_score: int | None
     season: str
     season_type: str
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": False}
 
 
 class TodaysGamesResponse(BaseModel):

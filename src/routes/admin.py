@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from src.cache.redis_client import cache_delete_pattern, get_redis
+from src.ingestion.nba_stats_ingester import ingest_todays_games
 from src.ingestion.scheduler import get_scheduler
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -61,6 +62,14 @@ async def scheduler_status():
         for job in scheduler.get_jobs()
     ]
     return SchedulerStatusResponse(running=scheduler.running, jobs=jobs)
+
+
+@router.post("/refresh-today", status_code=200)
+async def refresh_today():
+    """Flush today's game cache and re-ingest from nba_api."""
+    await cache_delete_pattern("games:*")
+    await ingest_todays_games()
+    return {"ok": True}
 
 
 @router.post("/scheduler/{job_id}/run", status_code=202)

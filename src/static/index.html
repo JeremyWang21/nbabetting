@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NBA Props Dashboard</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0f1117; --surface: #1a1d27; --surface2: #222535;
+  --border: #2e3148; --text: #e2e8f0; --muted: #6b7280;
+  --accent: #6366f1; --accent-dim: #1e1b4b;
+  --green: #22c55e; --red: #ef4444; --yellow: #f59e0b;
+}
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; }
+
+/* header */
+header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 100; }
+header h1 { font-size: 17px; font-weight: 700; }
+.header-date { color: var(--muted); font-size: 12px; }
+.spacer { flex: 1; }
+.btn { background: var(--accent); color: #fff; border: none; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; }
+.btn:hover { opacity: 0.85; }
+.btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+.btn-ghost:hover { border-color: var(--accent); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* tabs */
+.container { max-width: 1280px; margin: 0 auto; padding: 20px 16px; }
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+.tab { padding: 9px 16px; border: none; background: none; color: var(--muted); cursor: pointer; font-size: 13px; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab:hover:not(.active) { color: var(--text); }
+.panel { display: none; } .panel.active { display: block; }
+
+/* loading / empty */
+.loading { text-align: center; padding: 50px 20px; color: var(--muted); }
+.empty { text-align: center; padding: 50px 20px; color: var(--muted); }
+.empty .icon { font-size: 36px; margin-bottom: 10px; }
+.spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 6px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* tables */
+.table-wrap { border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+thead th { background: var(--surface2); padding: 9px 12px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); white-space: nowrap; border-bottom: 1px solid var(--border); }
+th.r, td.r { text-align: right; }
+tbody tr { border-bottom: 1px solid var(--border); }
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: var(--surface2); }
+td { padding: 9px 12px; white-space: nowrap; }
+
+/* badges / pills */
+.badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.badge-market { background: var(--accent-dim); color: #a5b4fc; }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+.pill-vf { background:#14532d; color:#86efac; }
+.pill-f  { background:#064e3b; color:#6ee7b7; }
+.pill-n  { background:#1e293b; color:var(--muted); }
+.pill-t  { background:#431407; color:#fca5a5; }
+.pill-vt { background:#7f1d1d; color:#fca5a5; }
+
+.lean-over  { color: var(--green); font-weight: 700; }
+.lean-under { color: var(--red);   font-weight: 700; }
+.lean-push  { color: var(--muted); font-weight: 600; }
+.edge-pos   { color: var(--green); font-weight: 700; }
+.edge-neg   { color: var(--red);   font-weight: 700; }
+.edge-zero  { color: var(--muted); }
+
+/* games grid */
+.games-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.game-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.game-matchup { display: flex; align-items: center; justify-content: space-between; font-size: 18px; font-weight: 800; margin-bottom: 4px; }
+.game-matchup .at { color: var(--muted); font-size: 14px; font-weight: 400; }
+.game-fullname { color: var(--muted); font-size: 11px; margin-bottom: 8px; }
+.game-status { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; background: var(--surface2); color: var(--muted); }
+
+/* add line form */
+.form-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 22px; max-width: 580px; }
+.form-card h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.form-subtitle { color: var(--muted); font-size: 12px; margin-bottom: 18px; }
+.form-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.form-group { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 120px; }
+.form-group label { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
+.form-group input, .form-group select {
+  background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+  padding: 8px 10px; border-radius: 6px; font-size: 13px; outline: none;
+}
+.form-group input:focus, .form-group select:focus { border-color: var(--accent); }
+.form-group input::placeholder { color: #4b5563; }
+
+/* player autocomplete */
+.autocomplete-wrap { position: relative; }
+.autocomplete-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+  max-height: 220px; overflow-y: auto; z-index: 200; display: none;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+}
+.ac-item { padding: 9px 12px; cursor: pointer; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+.ac-item:last-child { border-bottom: none; }
+.ac-item:hover { background: var(--surface); }
+.ac-item .name { font-size: 13px; font-weight: 500; }
+.ac-item .meta { font-size: 11px; color: var(--muted); }
+.ac-item .playing-badge { font-size: 10px; background: #14532d; color: #86efac; padding: 1px 6px; border-radius: 3px; }
+.ac-item .not-playing { font-size: 10px; background: #431407; color: #fca5a5; padding: 1px 6px; border-radius: 3px; }
+
+.warn-box { background: #431407; border: 1px solid #7f2b0d; border-radius: 6px; padding: 8px 12px; font-size: 12px; color: #fca5a5; margin-top: 6px; display: none; }
+
+/* players tab */
+.search-row { display: flex; gap: 8px; margin-bottom: 18px; }
+.search-row input { flex: 1; max-width: 340px; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 6px; font-size: 14px; outline: none; }
+.search-row input:focus { border-color: var(--accent); }
+
+.player-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 12px; }
+.player-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+.player-card-header h3 { font-size: 16px; font-weight: 700; }
+.player-card-header .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.stat-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: center; }
+.stat-box .val { font-size: 20px; font-weight: 700; color: var(--accent); }
+.stat-box .lbl { font-size: 10px; color: var(--muted); margin-top: 1px; text-transform: uppercase; letter-spacing: .3px; }
+.section-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin: 12px 0 8px; }
+
+/* compare controls */
+.controls-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.controls-bar label { font-size: 12px; color: var(--muted); }
+input[type=range] { accent-color: var(--accent); width: 120px; }
+.count-tag { font-size: 12px; color: var(--muted); margin-left: auto; }
+
+/* del btn */
+.del-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+.del-btn:hover { border-color: var(--red); color: var(--red); }
+
+/* today players chips */
+.team-group { margin-bottom: 16px; }
+.team-group-label { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .5px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 11px; font-size: 13px; cursor: pointer; transition: border-color .15s, background .15s; }
+.chip:hover { border-color: var(--accent); background: var(--accent-dim); color: #a5b4fc; }
+
+/* toast */
+.toast { position: fixed; bottom: 20px; right: 20px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 11px 16px; font-size: 13px; z-index: 300; transition: opacity .25s; max-width: 300px; }
+.toast.ok  { border-color: var(--green); color: var(--green); }
+.toast.err { border-color: var(--red);   color: var(--red); }
+.toast.off { opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>NBA Props</h1>
+    <div class="header-date" id="header-date"></div>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn btn-ghost" id="refresh-btn" onclick="hardRefresh()">↻ Refresh</button>
+</header>
+
+<div class="container">
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('compare')">📊 Compare Lines</button>
+    <button class="tab"        onclick="switchTab('add')">＋ Add Line</button>
+    <button class="tab"        onclick="switchTab('games')">🏀 Today's Games</button>
+    <button class="tab"        onclick="switchTab('players')">🔍 Players</button>
+  </div>
+
+  <!-- COMPARE -->
+  <div class="panel active" id="panel-compare">
+    <div class="controls-bar">
+      <label>Lookback</label>
+      <input type="range" id="lb-slider" min="3" max="30" value="15"
+             oninput="document.getElementById('lb-val').textContent=this.value">
+      <strong id="lb-val">15</strong><label>games</label>
+      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="loadCompare()">Apply</button>
+      <span class="count-tag" id="compare-count"></span>
+    </div>
+    <div id="compare-body"><div class="loading"><span class="spinner"></span>Loading...</div></div>
+  </div>
+
+  <!-- ADD LINE -->
+  <div class="panel" id="panel-add">
+    <div class="form-card">
+      <h3>Enter a Bookmaker Line</h3>
+      <p class="form-subtitle">Add a line from your sportsbook — we'll compare it against our projection.</p>
+
+      <div class="form-row">
+        <div class="form-group" style="flex:2">
+          <label>Player</label>
+          <div class="autocomplete-wrap">
+            <input type="text" id="player-input" placeholder="Type player name…" autocomplete="off"
+                   oninput="onPlayerType(this.value)" onfocus="onPlayerType(this.value)">
+            <div class="autocomplete-dropdown" id="player-dropdown"></div>
+          </div>
+          <input type="hidden" id="player-id">
+          <input type="hidden" id="player-team-id">
+        </div>
+      </div>
+
+      <div id="not-playing-warn" class="warn-box">
+        ⚠ This player's team doesn't appear in today's games — the line won't show in Compare until a matching game is seeded.
+      </div>
+
+      <div class="form-row">
+        <div class="form-group" style="flex:2">
+          <label>Game</label>
+          <select id="game-select" onchange="document.getElementById('game-id').value=this.value">
+            <option value="">— select game —</option>
+          </select>
+          <input type="hidden" id="game-id">
+        </div>
+        <div class="form-group">
+          <label>Market</label>
+          <select id="market-select">
+            <option value="player_points">Points</option>
+            <option value="player_rebounds">Rebounds</option>
+            <option value="player_assists">Assists</option>
+            <option value="player_threes">3-Pointers Made</option>
+            <option value="player_blocks">Blocks</option>
+            <option value="player_steals">Steals</option>
+            <option value="player_turnovers">Turnovers</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Line</label>
+          <input type="number" id="line-input" step="0.5" placeholder="e.g. 24.5">
+        </div>
+        <div class="form-group">
+          <label>Bookmaker</label>
+          <input type="text" id="book-input" placeholder="DraftKings">
+        </div>
+        <div class="form-group">
+          <label>Over Price</label>
+          <input type="number" id="over-price" placeholder="-110">
+        </div>
+        <div class="form-group">
+          <label>Under Price</label>
+          <input type="number" id="under-price" placeholder="-110">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group" style="flex:1">
+          <label>Notes (optional)</label>
+          <input type="text" id="notes-input" placeholder="e.g. back-to-back, no Kawhi">
+        </div>
+      </div>
+
+      <button class="btn" id="submit-btn" onclick="submitLine()">Add Line →</button>
+    </div>
+  </div>
+
+  <!-- GAMES -->
+  <div class="panel" id="panel-games">
+    <div id="games-body"><div class="loading"><span class="spinner"></span>Loading...</div></div>
+  </div>
+
+  <!-- PLAYERS -->
+  <div class="panel" id="panel-players">
+    <div class="search-row">
+      <input type="text" id="player-search" placeholder="Search any player…"
+             onkeydown="if(event.key==='Enter') doPlayerSearch()">
+      <button class="btn btn-ghost" onclick="doPlayerSearch()">Search</button>
+    </div>
+    <div id="today-players-section">
+      <div class="section-label" style="margin-bottom:10px">Players in today's games — click to view stats</div>
+      <div id="today-players-list"><div class="loading"><span class="spinner"></span>Loading today's roster…</div></div>
+    </div>
+    <div id="players-body"></div>
+  </div>
+</div>
+
+<div class="toast off" id="toast"></div>
+
+<script>
+const API = '/api/v1';
+let currentTab = 'compare';
+let todaysGames = []; // [{id, home_team_id, away_team_id, home_team_abbr, ...}]
+let todayTeamIds = new Set();
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+async function apiFetch(path, opts = {}) {
+  const r = await fetch(API + path, opts);
+  if (!r.ok) { const t = await r.text(); throw new Error(t); }
+  if (r.status === 204) return null;
+  return r.json();
+}
+
+function toast(msg, type = 'ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `toast ${type}`;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.add('off'), 3200);
+}
+
+const fmt  = (v, d = 1) => v == null ? '—' : (+v).toFixed(d);
+const pct  = v => v == null ? '—' : (+v * 100).toFixed(0) + '%';
+const MKTL = { player_points:'PTS', player_rebounds:'REB', player_assists:'AST',
+               player_threes:'3PM', player_blocks:'BLK', player_steals:'STL', player_turnovers:'TO' };
+
+function matchupPill(label) {
+  if (!label) return '<span class="pill pill-n">—</span>';
+  const map = { 'very favorable':'pill-vf','favorable':'pill-f','neutral':'pill-n','tough':'pill-t','very tough':'pill-vt' };
+  return `<span class="pill ${map[label]||'pill-n'}">${label}</span>`;
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────────
+
+async function hardRefresh() {
+  const btn = document.getElementById('refresh-btn');
+  btn.textContent = '↻ Syncing…';
+  btn.disabled = true;
+  try {
+    await apiFetch('/admin/refresh-today', { method: 'POST' });
+    todaysGames = [];
+    todayTeamIds = new Set();
+    todayPlayersLoaded = false;
+    await ensureGamesLoaded();
+  } catch(e) { toast('Refresh failed: ' + e.message, 'err'); }
+  finally {
+    btn.textContent = '↻ Refresh';
+    btn.disabled = false;
+  }
+  refreshCurrent();
+}
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach((b, i) => {
+    b.classList.toggle('active', ['compare','add','games','players'][i] === tab);
+  });
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(`panel-${tab}`).classList.add('active');
+  if (tab === 'compare') loadCompare();
+  if (tab === 'games')   loadGames();
+  if (tab === 'add')     ensureGamesLoaded();
+  if (tab === 'players') loadTodayPlayers();
+}
+function refreshCurrent() { switchTab(currentTab); }
+
+window.onload = () => {
+  const d = new Date();
+  document.getElementById('header-date').textContent =
+    d.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
+  loadCompare();
+  ensureGamesLoaded();
+};
+
+// ── Games data (shared) ────────────────────────────────────────────────────
+
+async function ensureGamesLoaded() {
+  if (todaysGames.length) return populateGameSelect();
+  try {
+    const data = await apiFetch('/games/today');
+    todaysGames = data.games || [];
+    todayTeamIds = new Set(todaysGames.flatMap(g => [g.home_team_id, g.away_team_id]));
+    populateGameSelect();
+  } catch(e) {}
+}
+
+function populateGameSelect() {
+  const sel = document.getElementById('game-select');
+  sel.innerHTML = '<option value="">— select game —</option>';
+  todaysGames.forEach(g => {
+    const label = `${g.away_team_abbr || g.away_team_id} @ ${g.home_team_abbr || g.home_team_id}`;
+    sel.innerHTML += `<option value="${g.id}">${label}</option>`;
+  });
+}
+
+// ── Compare ────────────────────────────────────────────────────────────────
+
+async function loadCompare() {
+  const lb  = document.getElementById('lb-slider').value;
+  const el  = document.getElementById('compare-body');
+  document.getElementById('compare-count').textContent = '';
+  el.innerHTML = '<div class="loading"><span class="spinner"></span>Loading...</div>';
+  try {
+    const data = await apiFetch(`/custom-lines/compare?lookback=${lb}`);
+    renderCompare(data, el);
+  } catch(e) {
+    el.innerHTML = `<div class="empty"><div class="icon">📭</div><p>No lines yet — add some in the <strong>Add Line</strong> tab.</p></div>`;
+  }
+}
+
+function renderCompare(data, el) {
+  if (!data.comparisons.length) {
+    el.innerHTML = `<div class="empty"><div class="icon">📭</div><p>No lines for today. Use the <strong>Add Line</strong> tab to get started.</p></div>`;
+    return;
+  }
+  document.getElementById('compare-count').textContent = `${data.count} line${data.count!==1?'s':''} · sorted by edge`;
+  const rows = data.comparisons.map(r => {
+    const edgeCls = r.edge > 0 ? 'edge-pos' : r.edge < 0 ? 'edge-neg' : 'edge-zero';
+    const edgeStr = r.edge > 0 ? `+${fmt(r.edge)}` : fmt(r.edge);
+    return `<tr>
+      <td>
+        <div style="font-weight:600">${r.player_name}</div>
+        <div style="color:var(--muted);font-size:11px">vs ${r.opponent||'?'} · ${r.game_date}</div>
+      </td>
+      <td><span class="badge badge-market">${MKTL[r.market_key]||r.market_key}</span></td>
+      <td class="r">${fmt(r.your_line)}</td>
+      <td class="r" style="color:var(--muted)">${fmt(r.projected_value)}</td>
+      <td class="r"><strong>${fmt(r.adjusted_projection)}</strong></td>
+      <td class="r ${edgeCls}">${edgeStr}</td>
+      <td class="lean-${r.lean}">${r.lean.toUpperCase()}</td>
+      <td>${matchupPill(r.matchup_label)}</td>
+      <td class="r">${pct(r.hit_rate_over)} / ${pct(r.hit_rate_under)}</td>
+      <td class="r" style="color:var(--muted)">${fmt(r.floor)} – ${fmt(r.ceiling)}</td>
+      <td class="r" style="color:var(--muted)">${fmt(r.std_dev)}</td>
+      <td class="r" style="color:var(--muted)">${r.sample_size}</td>
+      <td class="r" style="color:var(--muted)">${r.bookmaker||'—'}</td>
+      <td><button class="del-btn" onclick="deleteLine(${r.custom_line_id})">✕</button></td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Player</th><th>Mkt</th>
+          <th class="r">Your Line</th>
+          <th class="r">Base</th>
+          <th class="r">Adj Proj</th>
+          <th class="r">Edge</th>
+          <th>Lean</th>
+          <th>Matchup</th>
+          <th class="r">Hit% O/U</th>
+          <th class="r">Floor–Ceil</th>
+          <th class="r">σ</th>
+          <th class="r">N</th>
+          <th>Book</th>
+          <th></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+async function deleteLine(id) {
+  try {
+    await apiFetch(`/custom-lines/${id}`, { method:'DELETE' });
+    toast('Line removed');
+    loadCompare();
+  } catch(e) { toast('Delete failed', 'err'); }
+}
+
+// ── Games tab ──────────────────────────────────────────────────────────────
+
+async function loadGames() {
+  const el = document.getElementById('games-body');
+  el.innerHTML = '<div class="loading"><span class="spinner"></span>Loading...</div>';
+  try {
+    const data = await apiFetch('/games/today');
+    todaysGames = data.games || [];
+    todayTeamIds = new Set(todaysGames.flatMap(g => [g.home_team_id, g.away_team_id]));
+    populateGameSelect();
+    renderGames(data, el);
+  } catch(e) {
+    el.innerHTML = `<div class="empty"><div class="icon">🏀</div><p>No games found for today.</p></div>`;
+  }
+}
+
+function renderGames(data, el) {
+  if (!data.games.length) {
+    el.innerHTML = `<div class="empty"><div class="icon">🏀</div><p>No games scheduled for today.</p></div>`;
+    return;
+  }
+  const cards = data.games.map(g => `
+    <div class="game-card">
+      <div class="game-matchup">
+        <span>${g.away_team_abbr || '?'}</span>
+        <span class="at">@</span>
+        <span>${g.home_team_abbr || '?'}</span>
+      </div>
+      <div class="game-fullname">${g.away_team_name || ''} at ${g.home_team_name || ''}</div>
+      <span class="game-status">${g.status}</span>
+    </div>`).join('');
+  el.innerHTML = `
+    <p style="color:var(--muted);font-size:12px;margin-bottom:12px">${data.count} game${data.count!==1?'s':''} · ${data.date}</p>
+    <div class="games-grid">${cards}</div>`;
+}
+
+// ── Add Line ───────────────────────────────────────────────────────────────
+
+let acTimeout;
+function onPlayerType(q) {
+  clearTimeout(acTimeout);
+  // clear previous selection when user retypes
+  document.getElementById('player-id').value = '';
+  document.getElementById('player-team-id').value = '';
+  document.getElementById('not-playing-warn').style.display = 'none';
+  if (q.length < 2) { closeDropdown(); return; }
+  acTimeout = setTimeout(() => fetchPlayerSuggestions(q), 220);
+}
+
+async function fetchPlayerSuggestions(q) {
+  try {
+    const data = await apiFetch(`/players/search?q=${encodeURIComponent(q)}&limit=10`);
+    const players = data.players || [];
+    const dd = document.getElementById('player-dropdown');
+    if (!players.length) { closeDropdown(); return; }
+    dd.innerHTML = players.map(p => {
+      const playing = p.team_id && todayTeamIds.has(p.team_id);
+      const tag = playing
+        ? `<span class="playing-badge">Playing today</span>`
+        : `<span class="not-playing">Not scheduled</span>`;
+      return `<div class="ac-item" onclick="selectPlayer(${p.id},${p.team_id||'null'},'${p.full_name.replace(/'/g,"\\'")}')">
+        <div>
+          <div class="name">${p.full_name}</div>
+          <div class="meta">${p.team_abbreviation||'FA'} · ${p.position||'—'}</div>
+        </div>
+        ${tag}
+      </div>`;
+    }).join('');
+    dd.style.display = 'block';
+  } catch(e) { closeDropdown(); }
+}
+
+function selectPlayer(id, teamId, name) {
+  document.getElementById('player-input').value = name;
+  document.getElementById('player-id').value = id;
+  document.getElementById('player-team-id').value = teamId || '';
+  closeDropdown();
+  // Auto-select game if player's team is in today's games
+  if (teamId && todayTeamIds.has(teamId)) {
+    const game = todaysGames.find(g => g.home_team_id === teamId || g.away_team_id === teamId);
+    if (game) document.getElementById('game-select').value = game.id;
+    document.getElementById('not-playing-warn').style.display = 'none';
+  } else {
+    document.getElementById('not-playing-warn').style.display = 'block';
+  }
+}
+
+function closeDropdown() {
+  document.getElementById('player-dropdown').style.display = 'none';
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('.autocomplete-wrap')) closeDropdown();
+});
+
+async function submitLine() {
+  const player_id  = parseInt(document.getElementById('player-id').value);
+  const game_id    = parseInt(document.getElementById('game-select').value);
+  const market_key = document.getElementById('market-select').value;
+  const over_line  = parseFloat(document.getElementById('line-input').value);
+  const bookmaker  = document.getElementById('book-input').value || null;
+  const over_price = parseInt(document.getElementById('over-price').value) || null;
+  const under_price= parseInt(document.getElementById('under-price').value) || null;
+  const notes      = document.getElementById('notes-input').value || null;
+
+  if (!player_id)    { toast('Select a player first', 'err'); return; }
+  if (!game_id)      { toast('Select a game', 'err'); return; }
+  if (isNaN(over_line)) { toast('Enter a valid line', 'err'); return; }
+
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  try {
+    await apiFetch('/custom-lines', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ player_id, game_id, market_key, over_line, bookmaker, over_price, under_price, notes }),
+    });
+    toast('Line added!');
+    document.getElementById('line-input').value = '';
+    document.getElementById('over-price').value = '';
+    document.getElementById('under-price').value = '';
+    document.getElementById('notes-input').value = '';
+  } catch(e) {
+    toast('Error: ' + e.message, 'err');
+  } finally { btn.disabled = false; }
+}
+
+// ── Players tab ────────────────────────────────────────────────────────────
+
+let todayPlayersLoaded = false;
+
+async function loadTodayPlayers() {
+  if (todayPlayersLoaded) return;
+  const el = document.getElementById('today-players-list');
+  try {
+    await ensureGamesLoaded();
+    if (!todaysGames.length) {
+      el.innerHTML = `<p style="color:var(--muted);font-size:13px">No games today — try searching for any player above.</p>`;
+      return;
+    }
+    // fetch rosters for all teams playing today
+    const teamIds = [...new Set(todaysGames.flatMap(g => [g.home_team_id, g.away_team_id]))];
+    const rosters = await Promise.all(teamIds.map(tid => apiFetch(`/players/by-team/${tid}`).catch(() => ({players:[]}))));
+
+    // group by game matchup
+    const teamPlayers = {};
+    teamIds.forEach((tid, i) => { teamPlayers[tid] = rosters[i].players || []; });
+
+    const groups = todaysGames.map(g => {
+      const label = `${g.away_team_abbr||'?'} @ ${g.home_team_abbr||'?'}`;
+      const players = [...(teamPlayers[g.away_team_id]||[]), ...(teamPlayers[g.home_team_id]||[])];
+      return { label, players };
+    }).filter(g => g.players.length);
+
+    if (!groups.length) {
+      el.innerHTML = `<p style="color:var(--muted);font-size:13px">No roster data found yet — run bootstrap to seed players.</p>`;
+      return;
+    }
+
+    el.innerHTML = groups.map(g => `
+      <div class="team-group">
+        <div class="team-group-label">${g.label}</div>
+        <div class="chips">
+          ${g.players.map(p =>
+            `<div class="chip" onclick="quickViewPlayer(${p.id},'${p.full_name.replace(/'/g,"\\'")}',\`${p.team_abbreviation||'?'}\`,\`${p.position||'—'}\`)">${p.full_name}</div>`
+          ).join('')}
+        </div>
+      </div>`).join('');
+    todayPlayersLoaded = true;
+  } catch(e) {
+    el.innerHTML = `<p style="color:var(--muted);font-size:13px">Could not load today's players.</p>`;
+  }
+}
+
+async function quickViewPlayer(id, name, team, pos) {
+  const el = document.getElementById('players-body');
+  // scroll to body
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  el.innerHTML = '<div class="loading"><span class="spinner"></span>Loading...</div>';
+  await appendPlayerCard({ id, full_name: name, team_abbreviation: team, position: pos, jersey_number: null }, el);
+}
+
+async function doPlayerSearch() {
+  const q = document.getElementById('player-search').value.trim();
+  if (!q) return;
+  const el = document.getElementById('players-body');
+  el.innerHTML = '<div class="loading"><span class="spinner"></span>Searching...</div>';
+  try {
+    const data = await apiFetch(`/players/search?q=${encodeURIComponent(q)}&limit=5`);
+    const players = data.players || [];
+    if (!players.length) {
+      el.innerHTML = `<div class="empty"><div class="icon">🔍</div><p>No results for "${q}"</p></div>`;
+      return;
+    }
+    el.innerHTML = '';
+    for (const p of players) await appendPlayerCard(p, el);
+  } catch(e) {
+    el.innerHTML = `<div class="empty"><p>Error: ${e.message}</p></div>`;
+  }
+}
+
+async function appendPlayerCard(p, container) {
+  const card = document.createElement('div');
+  card.className = 'player-card';
+  card.innerHTML = `
+    <div class="player-card-header">
+      <div>
+        <h3>${p.full_name}</h3>
+        <div class="meta">${p.team_abbreviation||'Free Agent'} · ${p.position||'—'} · #${p.jersey_number||'?'}</div>
+      </div>
+    </div>
+    <div id="pc-stats-${p.id}"><span class="spinner"></span></div>
+    <div class="section-label">Last 8 Games</div>
+    <div id="pc-logs-${p.id}"><span class="spinner"></span></div>`;
+  container.appendChild(card);
+
+  // Season averages
+  try {
+    const stats = await apiFetch(`/players/${p.id}/stats`);
+    const s = stats.season_averages;
+    const el = document.getElementById(`pc-stats-${p.id}`);
+    if (s) {
+      el.innerHTML = `
+        <div class="section-label">Season Averages (${s.season})</div>
+        <div class="stat-grid">
+          <div class="stat-box"><div class="val">${fmt(s.ppg)}</div><div class="lbl">PTS</div></div>
+          <div class="stat-box"><div class="val">${fmt(s.rpg)}</div><div class="lbl">REB</div></div>
+          <div class="stat-box"><div class="val">${fmt(s.apg)}</div><div class="lbl">AST</div></div>
+          <div class="stat-box"><div class="val">${fmt(s.spg, 2)}</div><div class="lbl">STL</div></div>
+          <div class="stat-box"><div class="val">${fmt(s.bpg, 2)}</div><div class="lbl">BLK</div></div>
+          <div class="stat-box"><div class="val">${fmt(s.mpg)}</div><div class="lbl">MIN</div></div>
+          <div class="stat-box"><div class="val">${s.fg_pct!=null?(s.fg_pct*100).toFixed(1)+'%':'—'}</div><div class="lbl">FG%</div></div>
+          <div class="stat-box"><div class="val">${s.fg3_pct!=null?(s.fg3_pct*100).toFixed(1)+'%':'—'}</div><div class="lbl">3P%</div></div>
+          <div class="stat-box"><div class="val">${s.ft_pct!=null?(s.ft_pct*100).toFixed(1)+'%':'—'}</div><div class="lbl">FT%</div></div>
+          <div class="stat-box"><div class="val">${s.games_played||'—'}</div><div class="lbl">GP</div></div>
+        </div>`;
+    } else {
+      el.innerHTML = `<p style="color:var(--muted);font-size:13px">No season averages on file.</p>`;
+    }
+  } catch(e) {
+    document.getElementById(`pc-stats-${p.id}`).innerHTML = '';
+  }
+
+  // Game logs
+  try {
+    const logs = await apiFetch(`/players/${p.id}/gamelogs?limit=8`);
+    const el = document.getElementById(`pc-logs-${p.id}`);
+    if (!logs.length) { el.innerHTML = `<p style="color:var(--muted);font-size:13px">No game logs on file.</p>`; return; }
+    const rows = logs.map(l => `<tr>
+      <td>${l.game_date||'—'}</td>
+      <td style="color:var(--muted)">${l.opponent_abbreviation||'—'}</td>
+      <td class="r">${l.points??'—'}</td>
+      <td class="r">${l.rebounds??'—'}</td>
+      <td class="r">${l.assists??'—'}</td>
+      <td class="r">${l.fg3_made??'—'}</td>
+      <td class="r">${l.steals??'—'}</td>
+      <td class="r">${l.blocks??'—'}</td>
+      <td class="r" style="color:var(--muted)">${l.minutes||'—'}</td>
+    </tr>`).join('');
+    el.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Date</th><th>Opp</th>
+            <th class="r">PTS</th><th class="r">REB</th><th class="r">AST</th>
+            <th class="r">3PM</th><th class="r">STL</th><th class="r">BLK</th><th class="r">MIN</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  } catch(e) {
+    document.getElementById(`pc-logs-${p.id}`).innerHTML = '';
+  }
+}
+</script>
+</body>
+</html>

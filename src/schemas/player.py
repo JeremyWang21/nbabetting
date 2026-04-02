@@ -14,6 +14,7 @@ class PlayerBase(BaseModel):
 
 class PlayerResponse(PlayerBase):
     id: int
+    team_abbreviation: str | None = None
 
     model_config = {"from_attributes": True}
 

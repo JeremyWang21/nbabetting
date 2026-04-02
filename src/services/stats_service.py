@@ -21,18 +21,53 @@ class StatsService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def search_players(self, query: str) -> PlayerSearchResponse:
-        # Search results aren't cached — queries are cheap and vary too much
+    async def search_players(self, query: str, limit: int = 20) -> PlayerSearchResponse:
         result = await self.db.execute(
             select(Player)
             .where(Player.full_name.ilike(f"%{query}%"), Player.is_active.is_(True))
-            .limit(20)
+            .limit(limit)
         )
         players = result.scalars().all()
-        return PlayerSearchResponse(
-            players=[PlayerResponse.model_validate(p) for p in players],
-            total=len(players),
+
+        team_ids = {p.team_id for p in players if p.team_id}
+        team_abbrs: dict[int, str] = {}
+        if team_ids:
+            team_result = await self.db.execute(
+                select(Team.id, Team.abbreviation).where(Team.id.in_(team_ids))
+            )
+            team_abbrs = {row.id: row.abbreviation for row in team_result}
+
+        enriched = [
+            PlayerResponse(
+                **{c: getattr(p, c) for c in Player.__table__.columns.keys()},
+                team_abbreviation=team_abbrs.get(p.team_id) if p.team_id else None,
+            )
+            for p in players
+        ]
+        return PlayerSearchResponse(players=enriched, total=len(enriched))
+
+    async def get_players_by_team(self, team_id: int) -> PlayerSearchResponse:
+        result = await self.db.execute(
+            select(Player)
+            .where(Player.team_id == team_id, Player.is_active.is_(True))
+            .order_by(Player.full_name)
         )
+        players = result.scalars().all()
+
+        team_result = await self.db.execute(
+            select(Team.id, Team.abbreviation).where(Team.id == team_id)
+        )
+        row = team_result.first()
+        abbr = row.abbreviation if row else None
+
+        enriched = [
+            PlayerResponse(
+                **{c: getattr(p, c) for c in Player.__table__.columns.keys()},
+                team_abbreviation=abbr,
+            )
+            for p in players
+        ]
+        return PlayerSearchResponse(players=enriched, total=len(enriched))
 
     async def get_player_stats(self, player_id: int) -> PlayerStatsResponse:
         cache_key = player_stats(player_id)

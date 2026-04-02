@@ -182,7 +182,7 @@ async def ingest_game_logs() -> None:
                 .values(
                     player_id=internal_player_id,
                     game_id=internal_game_id,
-                    minutes=r.get("MIN"),
+                    minutes=str(r.get("MIN")) if r.get("MIN") is not None else None,
                     points=_int(r.get("PTS")),
                     rebounds=_int(r.get("REB")),
                     assists=_int(r.get("AST")),
@@ -200,7 +200,7 @@ async def ingest_game_logs() -> None:
                 .on_conflict_do_update(
                     constraint="uq_player_game_logs_player_id_game_id",
                     set_={
-                        "minutes": r.get("MIN"),
+                        "minutes": str(r.get("MIN")) if r.get("MIN") is not None else None,
                         "points": _int(r.get("PTS")),
                         "rebounds": _int(r.get("REB")),
                         "assists": _int(r.get("AST")),

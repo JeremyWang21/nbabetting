@@ -1,7 +1,10 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.cache.redis_client import close_redis
 from src.db.session import engine
@@ -40,7 +43,15 @@ app.include_router(custom_lines.router, prefix="/api/v1")
 app.include_router(injuries.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 
+_static = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=_static), name="static")
+
 
 @app.get("/health", tags=["health"])
 async def health():
     return {"status": "ok", "version": app.version}
+
+
+@app.get("/", include_in_schema=False)
+async def dashboard():
+    return FileResponse(_static / "index.html")

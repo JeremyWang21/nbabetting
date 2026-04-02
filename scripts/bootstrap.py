@@ -31,21 +31,24 @@ logger = logging.getLogger("bootstrap")
 
 async def main() -> None:
     from src.ingestion.roster_ingester import ingest_roster_updates
-    from src.ingestion.nba_stats_ingester import ingest_season_averages, ingest_todays_games
+    from src.ingestion.nba_stats_ingester import ingest_season_averages, ingest_todays_games, ingest_game_logs
     from src.ingestion.defensive_stats_ingester import ingest_defensive_stats
 
     logger.info("=== Bootstrap starting ===")
 
-    logger.info("Step 1/4: syncing teams + players (roster)")
+    logger.info("Step 1/5: syncing teams + players (roster)")
     await ingest_roster_updates()
 
-    logger.info("Step 2/4: fetching today's games")
+    logger.info("Step 2/5: fetching today's games")
     await ingest_todays_games()
 
-    logger.info("Step 3/4: fetching season averages (all active players)")
+    logger.info("Step 3/5: fetching season averages (all active players)")
     await ingest_season_averages()
 
-    logger.info("Step 4/4: fetching team defensive stats (matchup data)")
+    logger.info("Step 4/5: fetching historical game logs (last ~25 games per player)")
+    await ingest_game_logs()
+
+    logger.info("Step 5/5: fetching team defensive stats (matchup data)")
     await ingest_defensive_stats()
 
     logger.info("=== Bootstrap complete ===")

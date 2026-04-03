@@ -114,8 +114,11 @@ async def ingest_todays_games() -> None:
 
         await session.commit()
 
-    await cache_delete(games_today())
-    await cache_delete_pattern(PATTERN_PROJECTIONS_ALL)
+    try:
+        await cache_delete(games_today())
+        await cache_delete_pattern(PATTERN_PROJECTIONS_ALL)
+    except Exception:
+        pass
     logger.info("ingest_todays_games: upserted %d games", upserted)
 
     # If all today's games are finished, also pull tomorrow's schedule
@@ -281,9 +284,12 @@ async def ingest_game_logs() -> None:
 
         await session.commit()
 
-    await cache_delete_pattern(PATTERN_PLAYER_GAMELOGS_ALL)
-    await cache_delete_pattern(PATTERN_PLAYER_STATS_ALL)
-    await cache_delete_pattern(PATTERN_PROJECTIONS_ALL)
+    try:
+        await cache_delete_pattern(PATTERN_PLAYER_GAMELOGS_ALL)
+        await cache_delete_pattern(PATTERN_PLAYER_STATS_ALL)
+        await cache_delete_pattern(PATTERN_PROJECTIONS_ALL)
+    except Exception:
+        pass
     logger.info(
         "ingest_game_logs: upserted %d rows, skipped %d (unknown game/player)",
         upserted,
@@ -368,7 +374,10 @@ async def ingest_season_averages() -> None:
 
         await session.commit()
 
-    await cache_delete_pattern(PATTERN_PLAYER_STATS_ALL)
+    try:
+        await cache_delete_pattern(PATTERN_PLAYER_STATS_ALL)
+    except Exception:
+        pass
     logger.info(
         "ingest_season_averages: upserted %d, skipped %d", upserted, skipped
     )

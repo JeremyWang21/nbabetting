@@ -37,7 +37,10 @@ class GameService:
             all_tomorrow, _ = await self._fetch_games_for_date(tomorrow)
             games, display_date = (all_tomorrow, tomorrow) if all_tomorrow else ([], today)
         else:
-            games = []
+            # No games today at all — show tomorrow
+            tomorrow = today + timedelta(days=1)
+            all_tomorrow, _ = await self._fetch_games_for_date(tomorrow)
+            games, display_date = (all_tomorrow, tomorrow) if all_tomorrow else ([], today)
 
         enriched = await self._enrich(games)
         response = TodaysGamesResponse(date=display_date, games=enriched, count=len(enriched))

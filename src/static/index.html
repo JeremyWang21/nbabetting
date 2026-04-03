@@ -256,7 +256,7 @@ const esc = s => s.replace(/'/g,"\\'");
 window.onload = () => {
   const d = new Date();
   document.getElementById('hdate').textContent =
-    d.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+    d.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',timeZone:'America/New_York'});
   loadGames();
   document.addEventListener('keydown', e => { if (e.key==='Escape') closeGameDetail(); });
 };

@@ -8,9 +8,7 @@ from src.models.injury import InjuryReport
 from src.models.player import Player
 from src.models.team import Team
 from src.schemas.game import TodaysGamesResponse
-from src.schemas.props import BestLinesResponse
 from src.services.game_service import GameService
-from src.services.props_service import PropsService
 
 router = APIRouter(prefix="/games", tags=["games"])
 
@@ -78,11 +76,6 @@ async def get_game_players(game_id: int, db: AsyncSession = Depends(get_db)):
         "away_team_abbr": away_abbr,
         "players": result,
     }
-
-
-@router.get("/{game_id}/props", response_model=BestLinesResponse)
-async def get_game_props(game_id: int, db: AsyncSession = Depends(get_db)):
-    return await PropsService(db).get_game_props(game_id)
 
 
 @router.get("/{game_id}/boxscore/{player_id}")

@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     # ─── API Keys ──────────────────────────────────────────────────────────────
     tank01_api_key: str = Field("", validation_alias="TANK01_API_KEY")
+    admin_secret: str = Field("", validation_alias="ADMIN_SECRET")
 
     # ─── App ───────────────────────────────────────────────────────────────────
     environment: str = Field("local", validation_alias="ENVIRONMENT")

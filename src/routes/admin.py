@@ -3,12 +3,18 @@ Admin / debug endpoints.
 Not authenticated — personal use only. Do not expose publicly.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from src.cache.redis_client import cache_delete_pattern, get_redis
+from src.config.settings import settings
 from src.ingestion.nba_stats_ingester import ingest_todays_games
 from src.ingestion.scheduler import get_scheduler
+
+
+def _require_secret(x_admin_secret: str = Header("")) -> None:
+    if settings.admin_secret and x_admin_secret != settings.admin_secret:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -65,8 +71,9 @@ async def scheduler_status():
 
 
 @router.post("/refresh-today", status_code=200)
-async def refresh_today():
+async def refresh_today(x_admin_secret: str = Header("")):
     """Flush today's game cache and re-ingest from nba_api."""
+    _require_secret(x_admin_secret)
     await cache_delete_pattern("games:*")
     await ingest_todays_games()
     return {"ok": True}

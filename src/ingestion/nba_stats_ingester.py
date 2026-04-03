@@ -17,6 +17,8 @@ import logging
 from datetime import date, timedelta
 from functools import partial
 
+from src.utils.date_utils import today_et
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -88,7 +90,7 @@ async def ingest_todays_games() -> None:
                 pg_insert(Game)
                 .values(
                     nba_game_id=g["gameId"],
-                    game_date=date.today(),
+                    game_date=today_et(),
                     home_team_id=home_id,
                     away_team_id=away_id,
                     status=g.get("gameStatusText", "scheduled"),
@@ -100,6 +102,7 @@ async def ingest_todays_games() -> None:
                 .on_conflict_do_update(
                     index_elements=["nba_game_id"],
                     set_={
+                        "game_date": today_et(),
                         "status": g.get("gameStatusText", "scheduled"),
                         "home_score": home_score,
                         "away_score": away_score,
@@ -115,6 +118,62 @@ async def ingest_todays_games() -> None:
     await cache_delete_pattern(PATTERN_PROJECTIONS_ALL)
     logger.info("ingest_todays_games: upserted %d games", upserted)
 
+    # If all today's games are finished, also pull tomorrow's schedule
+    finished = {"final", "final/ot", "final/2ot", "final/3ot"}
+    if games_raw and all(g.get("gameStatusText", "").lower() in finished for g in games_raw):
+        logger.info("ingest_todays_games: all done — pre-fetching tomorrow's schedule")
+        await _ingest_date_schedule(today_et() + timedelta(days=1))
+
+
+async def _ingest_date_schedule(target_date: date) -> None:
+    """Pull schedule for a specific date via ScoreboardV2 and upsert."""
+    from nba_api.stats.endpoints import ScoreboardV2
+
+    date_str = target_date.strftime("%m/%d/%Y")
+    logger.info("_ingest_date_schedule: fetching %s", date_str)
+    await nba_limiter.acquire()
+    endpoint = await asyncio.get_event_loop().run_in_executor(
+        None,
+        partial(ScoreboardV2, game_date=date_str, league_id="00"),
+    )
+    data = endpoint.get_normalized_dict()
+    headers = data.get("GameHeader", [])
+    if not headers:
+        logger.info("_ingest_date_schedule: no games on %s", date_str)
+        return
+
+    async with AsyncSessionLocal() as session:
+        team_result = await session.execute(select(Team.nba_id, Team.id))
+        team_map: dict[int, int] = {row.nba_id: row.id for row in team_result}
+        upserted = 0
+        for g in headers:
+            home_id = team_map.get(g.get("HOME_TEAM_ID"))
+            away_id = team_map.get(g.get("VISITOR_TEAM_ID"))
+            if not home_id or not away_id:
+                continue
+            stmt = (
+                pg_insert(Game)
+                .values(
+                    nba_game_id=g["GAME_ID"],
+                    game_date=target_date,
+                    home_team_id=home_id,
+                    away_team_id=away_id,
+                    status=g.get("GAME_STATUS_TEXT", "Scheduled"),
+                    home_score=None,
+                    away_score=None,
+                    season=CURRENT_SEASON,
+                    season_type="Regular Season",
+                )
+                .on_conflict_do_update(
+                    index_elements=["nba_game_id"],
+                    set_={"game_date": target_date, "status": g.get("GAME_STATUS_TEXT", "Scheduled")},
+                )
+            )
+            await session.execute(stmt)
+            upserted += 1
+        await session.commit()
+    logger.info("_ingest_date_schedule: upserted %d games for %s", upserted, target_date)
+
 
 # ── Game logs ─────────────────────────────────────────────────────────────────
 
@@ -125,7 +184,7 @@ async def ingest_game_logs() -> None:
     Uses LeagueGameLog which returns every player's line for every game
     in the date range — much more efficient than per-player requests.
     """
-    yesterday = date.today() - timedelta(days=1)
+    yesterday = today_et() - timedelta(days=1)
     date_str = yesterday.strftime("%m/%d/%Y")
     logger.info("ingest_game_logs: fetching box scores for %s", date_str)
 

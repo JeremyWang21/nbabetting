@@ -34,12 +34,8 @@ async def add_line(payload: CustomLineCreate, db: AsyncSession = Depends(get_db)
 
 @router.get("/compare", response_model=ComparisonResponse)
 async def compare_lines(
-    lookback: int = Query(
-        DEFAULT_LOOKBACK,
-        ge=3,
-        le=82,
-        description="Games to look back for projection",
-    ),
+    lookback: int = Query(DEFAULT_LOOKBACK, ge=3, le=82),
+    h2h: bool = Query(False, description="Filter sample to games vs today's opponent"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -47,7 +43,7 @@ async def compare_lines(
     Shows edge, lean (over/under), hit rate, floor/ceiling.
     Sorted by absolute edge — biggest edges first.
     """
-    return await CustomLineService(db).compare_today(lookback)
+    return await CustomLineService(db).compare_today(lookback, h2h=h2h)
 
 
 @router.get("/{line_id}", response_model=CustomLineResponse)

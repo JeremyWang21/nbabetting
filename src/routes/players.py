@@ -1,9 +1,15 @@
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.session import get_db
+from src.models.game import Game
+from src.models.game_log import PlayerGameLog
+from src.models.player import Player
+from src.models.team import Team
 from src.schemas.player import PlayerSearchResponse
 from src.schemas.stats import GameLogResponse, PlayerStatsResponse
+from src.services.projection_service import MARKET_TO_FIELD
 from src.services.stats_service import StatsService
 
 router = APIRouter(prefix="/players", tags=["players"])
@@ -35,3 +41,60 @@ async def get_player_gamelogs(
     db: AsyncSession = Depends(get_db),
 ):
     return await StatsService(db).get_player_gamelogs(player_id, limit)
+
+
+@router.get("/{player_id}/chart-data")
+async def get_player_chart_data(
+    player_id: int,
+    market: str = Query("player_points"),
+    lookback: int = Query(15, ge=3, le=82),
+    opponent_team_id: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return per-game values + dates for charting, plus season average for reference line."""
+    field = MARKET_TO_FIELD.get(market)
+    if field is None:
+        return {"labels": [], "values": [], "avg": None}
+
+    conditions = [
+        PlayerGameLog.player_id == player_id,
+        getattr(PlayerGameLog, field).is_not(None),
+    ]
+    if opponent_team_id:
+        conditions.append(
+            (Game.home_team_id == opponent_team_id) | (Game.away_team_id == opponent_team_id)
+        )
+
+    result = await db.execute(
+        select(PlayerGameLog, Game.game_date, Game.home_team_id, Game.away_team_id)
+        .join(Game, PlayerGameLog.game_id == Game.id)
+        .where(*conditions)
+        .order_by(Game.game_date.desc())
+        .limit(lookback)
+    )
+    rows = result.all()
+
+    # get player team for opponent label
+    player = await db.get(Player, player_id)
+    player_team_id = player.team_id if player else None
+
+    team_ids = {r.home_team_id for r in rows} | {r.away_team_id for r in rows}
+    if team_ids:
+        t_result = await db.execute(select(Team.id, Team.abbreviation).where(Team.id.in_(team_ids)))
+        team_abbr = {row.id: row.abbreviation for row in t_result}
+    else:
+        team_abbr = {}
+
+    # reverse so oldest → newest for chart
+    rows = list(reversed(rows))
+    labels, values, opps = [], [], []
+    for row in rows:
+        log, gdate, home_tid, away_tid = row[0], row.game_date, row.home_team_id, row.away_team_id
+        opp_id = away_tid if player_team_id and home_tid == player_team_id else home_tid
+        opp = team_abbr.get(opp_id, "?")
+        labels.append(f"{gdate.strftime('%m/%d')} vs {opp}")
+        values.append(float(getattr(log, field)))
+        opps.append(opp)
+
+    avg = round(sum(values) / len(values), 1) if values else None
+    return {"labels": labels, "values": values, "avg": avg, "field": field, "market": market}

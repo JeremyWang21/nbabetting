@@ -1,4 +1,4 @@
-from datetime import date
+from src.utils.date_utils import today_et
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -51,7 +51,7 @@ class CustomLineService:
         await self.db.commit()
 
     async def get_today(self) -> list[CustomLineResponse]:
-        today = date.today()
+        today = today_et()
         result = await self.db.execute(
             select(CustomLine)
             .join(Game, CustomLine.game_id == Game.id)
@@ -70,7 +70,7 @@ class CustomLineService:
     # ── Comparison ────────────────────────────────────────────────────────────
 
     async def compare_today(
-        self, lookback: int = DEFAULT_LOOKBACK
+        self, lookback: int = DEFAULT_LOOKBACK, h2h: bool = False
     ) -> ComparisonResponse:
         """
         For every custom line entered today, compute the projection and
@@ -90,14 +90,28 @@ class CustomLineService:
         rows: list[ComparisonRow] = []
         for line in today_lines:
             proj = await self._proj.project_player(
-                line.player_id, line.game_id, line.market_key, lookback
+                line.player_id, line.game_id, line.market_key, lookback, h2h=h2h
             )
             if proj is None:
                 # Not enough game log data yet — skip
                 continue
 
+            opp_id = proj.opponent  # abbreviation; for hit rate we need team_id
+            # For h2h hit rate, reuse the same opponent filter
+            from src.models.game import Game as GameModel
+            game_obj = await self.db.get(GameModel, line.game_id)
+            from src.models.player import Player as PlayerModel
+            player_obj = await self.db.get(PlayerModel, line.player_id)
+            opp_team_id = None
+            if h2h and game_obj and player_obj and player_obj.team_id:
+                opp_team_id = (
+                    game_obj.away_team_id if game_obj.home_team_id == player_obj.team_id
+                    else game_obj.home_team_id
+                )
+
             recent_vals = await self._proj.get_recent_values_for_market(
-                line.player_id, line.market_key, lookback
+                line.player_id, line.market_key, lookback,
+                opponent_team_id=opp_team_id,
             )
             hit_over, hit_under = self._proj.hit_rate(recent_vals, line.over_line)
 

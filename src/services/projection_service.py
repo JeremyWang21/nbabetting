@@ -9,8 +9,9 @@ Results are cached in Redis (TTL_PROJECTIONS) and busted after
 ingest_game_logs or ingest_defensive_stats writes.
 """
 
+from __future__ import annotations
+
 import statistics
-from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +21,7 @@ from src.cache.keys import (
     projections_player,
     projections_today,
 )
+from src.utils.date_utils import today_et
 from src.cache.redis_client import cache_get, cache_set
 from src.ingestion.nba_stats_ingester import CURRENT_SEASON
 from src.models.game import Game
@@ -64,6 +66,7 @@ class ProjectionService:
         game_id: int,
         market_key: str,
         lookback: int = DEFAULT_LOOKBACK,
+        h2h: bool = False,
     ) -> ProjectionResult | None:
         if market_key not in MARKET_TO_FIELD:
             return None
@@ -77,7 +80,8 @@ class ProjectionService:
 
         opponent_abbr, opponent_team_id = await self._get_opponent_info(game, player)
         values = await self._get_recent_values(
-            player_id, MARKET_TO_FIELD[market_key], lookback
+            player_id, MARKET_TO_FIELD[market_key], lookback,
+            opponent_team_id=opponent_team_id if h2h else None,
         )
         if not values:
             return None
@@ -150,7 +154,7 @@ class ProjectionService:
         if cached is not None:
             return [ProjectionResult.model_validate(r) for r in cached]
 
-        today = date.today()
+        today = today_et()
         game_result = await self.db.execute(
             select(Game).where(Game.game_date == today)
         )
@@ -210,24 +214,31 @@ class ProjectionService:
         player_id: int,
         market_key: str,
         lookback: int = DEFAULT_LOOKBACK,
+        opponent_team_id: int | None = None,
     ) -> list[float]:
         field = MARKET_TO_FIELD.get(market_key)
         if field is None:
             return []
-        return await self._get_recent_values(player_id, field, lookback)
+        return await self._get_recent_values(player_id, field, lookback, opponent_team_id=opponent_team_id)
 
     # ── Internals ─────────────────────────────────────────────────────────────
 
     async def _get_recent_values(
-        self, player_id: int, field: str, lookback: int
+        self, player_id: int, field: str, lookback: int,
+        opponent_team_id: int | None = None,
     ) -> list[float]:
+        conditions = [
+            PlayerGameLog.player_id == player_id,
+            getattr(PlayerGameLog, field).is_not(None),
+        ]
+        if opponent_team_id:
+            conditions.append(
+                (Game.home_team_id == opponent_team_id) | (Game.away_team_id == opponent_team_id)
+            )
         result = await self.db.execute(
             select(PlayerGameLog)
             .join(Game, PlayerGameLog.game_id == Game.id)
-            .where(
-                PlayerGameLog.player_id == player_id,
-                getattr(PlayerGameLog, field).is_not(None),
-            )
+            .where(*conditions)
             .order_by(Game.game_date.desc())
             .limit(lookback)
         )

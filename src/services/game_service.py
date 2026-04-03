@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +8,7 @@ from src.cache.redis_client import cache_get, cache_set
 from src.models.game import Game
 from src.models.team import Team
 from src.schemas.game import GameResponse, TodaysGamesResponse
+from src.utils.date_utils import today_et
 
 
 class GameService:
@@ -21,20 +22,38 @@ class GameService:
         if cached is not None:
             return TodaysGamesResponse.model_validate(cached)
 
-        today = date.today()
-        result = await self.db.execute(
-            select(Game).where(Game.game_date == today).order_by(Game.id)
-        )
-        games = result.scalars().all()
+        today = today_et()
+        games, display_date = await self._fetch_games_for_date(today)
 
-        # load team info
+        # If every game today is finished, show tomorrow's upcoming slate
+        finished = {"final", "final/ot", "final/2ot", "final/3ot"}
+        if games and all(g.status.lower() in finished for g in games):
+            tomorrow = today + timedelta(days=1)
+            next_games, _ = await self._fetch_games_for_date(tomorrow)
+            if next_games:
+                games, display_date = next_games, tomorrow
+
+        enriched = await self._enrich(games)
+        response = TodaysGamesResponse(date=display_date, games=enriched, count=len(enriched))
+        # Short TTL so refresh picks up tomorrow's slate quickly once today finishes
+        await cache_set(cache_key, response.model_dump(), ttl=TTL_GAMES_TODAY)
+        return response
+
+    async def _fetch_games_for_date(self, d: date):
+        result = await self.db.execute(
+            select(Game).where(Game.game_date == d).order_by(Game.id)
+        )
+        return result.scalars().all(), d
+
+    async def _enrich(self, games) -> list[GameResponse]:
+        if not games:
+            return []
         team_ids = {g.home_team_id for g in games} | {g.away_team_id for g in games}
         team_result = await self.db.execute(
             select(Team.id, Team.abbreviation, Team.name).where(Team.id.in_(team_ids))
         )
         teams = {row.id: row for row in team_result}
-
-        enriched = [
+        return [
             GameResponse(
                 id=g.id,
                 nba_game_id=g.nba_game_id,
@@ -53,7 +72,3 @@ class GameService:
             )
             for g in games
         ]
-
-        response = TodaysGamesResponse(date=today, games=enriched, count=len(enriched))
-        await cache_set(cache_key, response.model_dump(), ttl=TTL_GAMES_TODAY)
-        return response

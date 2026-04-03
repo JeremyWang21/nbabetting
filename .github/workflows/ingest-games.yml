@@ -36,11 +36,6 @@ jobs:
             ec2-user@${{ secrets.EC2_HOST }} -N &
           sleep 5
 
-      - name: Debug source files
-        run: |
-          echo "=== redis_client.py ===" && cat -n src/cache/redis_client.py
-          echo "=== nba_stats_ingester.py line 115-125 ===" && sed -n '115,125p' src/ingestion/nba_stats_ingester.py
-
       - name: Run game ingestion
         env:
           DATABASE_URL: postgresql+asyncpg://nbabetting:${{ secrets.DB_PASSWORD }}@localhost:5432/nbabetting

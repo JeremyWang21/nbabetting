@@ -1,9 +1,12 @@
 import json
+import logging
 from typing import Any
 
 import redis.asyncio as aioredis
 
 from src.config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 _redis: aioredis.Redis | None = None
 
@@ -16,26 +19,38 @@ def get_redis() -> aioredis.Redis:
 
 
 async def cache_get(key: str) -> Any | None:
-    value = await get_redis().get(key)
-    if value is None:
+    try:
+        value = await get_redis().get(key)
+        if value is None:
+            return None
+        return json.loads(value)
+    except Exception:
         return None
-    return json.loads(value)
 
 
 async def cache_set(key: str, value: Any, ttl: int) -> None:
-    await get_redis().set(key, json.dumps(value, default=str), ex=ttl)
+    try:
+        await get_redis().set(key, json.dumps(value, default=str), ex=ttl)
+    except Exception:
+        pass
 
 
 async def cache_delete(key: str) -> None:
-    await get_redis().delete(key)
+    try:
+        await get_redis().delete(key)
+    except Exception:
+        pass
 
 
 async def cache_delete_pattern(pattern: str) -> None:
     """Delete all keys matching a glob pattern (use sparingly — O(N))."""
-    client = get_redis()
-    keys = await client.keys(pattern)
-    if keys:
-        await client.delete(*keys)
+    try:
+        client = get_redis()
+        keys = await client.keys(pattern)
+        if keys:
+            await client.delete(*keys)
+    except Exception:
+        pass
 
 
 async def close_redis() -> None:

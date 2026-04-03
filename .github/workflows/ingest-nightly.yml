@@ -9,6 +9,12 @@ on:
 jobs:
   ingest:
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
     steps:
       - uses: actions/checkout@v4
 
@@ -32,7 +38,7 @@ jobs:
       - name: Run nightly ingestion
         env:
           DATABASE_URL: postgresql+asyncpg://nbabetting:${{ secrets.DB_PASSWORD }}@localhost:5432/nbabetting
-          REDIS_URL: redis://localhost
+          REDIS_URL: redis://localhost:6379/0
         run: |
           python -c "
           import asyncio

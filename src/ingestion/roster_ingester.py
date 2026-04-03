@@ -33,6 +33,7 @@ async def ingest_roster_updates() -> None:
     logger.info("ingest_roster_updates: starting")
     await _sync_teams()
     await _sync_players()
+    await _sync_positions()
     logger.info("ingest_roster_updates: done")
 
 
@@ -155,3 +156,38 @@ async def _sync_players() -> None:
 
         await session.commit()
     logger.info("_sync_players: done")
+
+
+async def _sync_positions() -> None:
+    """Backfill position + jersey_number via PlayerIndex (one bulk call)."""
+    from nba_api.stats.endpoints import PlayerIndex
+    from sqlalchemy import select
+    from sqlalchemy import update as sa_update
+
+    await nba_limiter.acquire()
+    try:
+        endpoint = await asyncio.get_event_loop().run_in_executor(
+            None, partial(PlayerIndex, league_id="00", season=CURRENT_SEASON)
+        )
+        rows = endpoint.get_normalized_dict()["PlayerIndex"]
+    except Exception as exc:
+        logger.warning("_sync_positions: PlayerIndex failed (%s)", exc)
+        return
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Player.nba_id, Player.id))
+        player_map: dict[int, int] = {row.nba_id: row.id for row in result}
+        updated = 0
+        for r in rows:
+            pid = player_map.get(r["PERSON_ID"])
+            if not pid:
+                continue
+            await session.execute(
+                sa_update(Player).where(Player.id == pid).values(
+                    position=r.get("POSITION") or None,
+                    jersey_number=r.get("JERSEY_NUMBER") or None,
+                )
+            )
+            updated += 1
+        await session.commit()
+    logger.info("_sync_positions: updated %d players", updated)

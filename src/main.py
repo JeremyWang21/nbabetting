@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from src.cache.redis_client import close_redis
 from src.db.session import engine
 from src.ingestion.scheduler import shutdown_scheduler, start_scheduler
-from src.routes import admin, custom_lines, games, injuries, players, projections, props
+from src.routes import admin, custom_lines, games, injuries, players, projections
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="NBA Betting Dashboard",
-    description="Player props, odds comparison, and NBA stats in one place.",
+    description="NBA player stats dashboard.",
     version="0.1.0",
     lifespan=lifespan,
 )

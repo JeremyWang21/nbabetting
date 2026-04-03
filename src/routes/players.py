@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,9 +9,17 @@ from src.models.game import Game
 from src.models.game_log import PlayerGameLog
 from src.models.player import Player
 from src.models.team import Team
+from src.utils.date_utils import today_et
 from src.schemas.player import PlayerSearchResponse
 from src.schemas.stats import GameLogResponse, PlayerStatsResponse
 from src.services.projection_service import MARKET_TO_FIELD
+
+# Combo markets: computed as sum of multiple columns
+COMBO_MARKETS: dict[str, list[str]] = {
+    "player_pa":  ["points", "assists"],
+    "player_ra":  ["rebounds", "assists"],
+    "player_pra": ["points", "rebounds", "assists"],
+}
 from src.services.stats_service import StatsService
 
 router = APIRouter(prefix="/players", tags=["players"])
@@ -53,14 +63,19 @@ async def get_player_chart_data(
     db: AsyncSession = Depends(get_db),
 ):
     """Return per-game values + dates for charting, plus season average for reference line."""
+    combo_fields = COMBO_MARKETS.get(market)
     field = MARKET_TO_FIELD.get(market)
-    if field is None:
-        return {"labels": [], "values": [], "minutes": [], "avg": None}
+    if field is None and combo_fields is None:
+        return {"labels": [], "values": [], "minutes": [], "game_ids": [], "avg": None, "b2b": False}
 
-    conditions = [
-        PlayerGameLog.player_id == player_id,
-        getattr(PlayerGameLog, field).is_not(None),
-    ]
+    # For combos, require all component fields to be non-null
+    conditions = [PlayerGameLog.player_id == player_id]
+    if combo_fields:
+        for f in combo_fields:
+            conditions.append(getattr(PlayerGameLog, f).is_not(None))
+    else:
+        conditions.append(getattr(PlayerGameLog, field).is_not(None))
+
     if opponent_team_id:
         conditions.append(
             (Game.home_team_id == opponent_team_id) | (Game.away_team_id == opponent_team_id)
@@ -71,7 +86,7 @@ async def get_player_chart_data(
         .join(Game, PlayerGameLog.game_id == Game.id)
         .where(*conditions)
         .order_by(Game.game_date.desc())
-        .limit(lookback * 3 if min_minutes > 0 else lookback)  # fetch extra to allow filtering
+        .limit(lookback * 3 if min_minutes > 0 else lookback)
     )
     rows = result.all()
 
@@ -86,9 +101,14 @@ async def get_player_chart_data(
     else:
         team_abbr = {}
 
+    def get_value(log) -> float:
+        if combo_fields:
+            return float(sum(getattr(log, f) or 0 for f in combo_fields))
+        return float(getattr(log, field))
+
     # reverse so oldest → newest for chart
     rows = list(reversed(rows))
-    labels, values, minutes_list = [], [], []
+    labels, values, minutes_list, game_ids = [], [], [], []
     for row in rows:
         log, gdate, home_tid, away_tid = row[0], row.game_date, row.home_team_id, row.away_team_id
         mins = float(log.minutes) if log.minutes is not None else 0.0
@@ -99,8 +119,22 @@ async def get_player_chart_data(
         opp_id = away_tid if player_team_id and home_tid == player_team_id else home_tid
         opp = team_abbr.get(opp_id, "?")
         labels.append(f"{gdate.strftime('%m/%d')} vs {opp}")
-        values.append(float(getattr(log, field)))
+        values.append(get_value(log))
         minutes_list.append(mins)
+        game_ids.append(log.game_id)
 
     avg = round(sum(values) / len(values), 1) if values else None
-    return {"labels": labels, "values": values, "minutes": minutes_list, "avg": avg, "field": field, "market": market}
+
+    # B2B: check if player's team played yesterday regardless of lookback/filter
+    yesterday = today_et() - timedelta(days=1)
+    b2b = False
+    if player and player.team_id:
+        b2b_result = await db.execute(
+            select(Game.id).where(
+                Game.game_date == yesterday,
+                (Game.home_team_id == player.team_id) | (Game.away_team_id == player.team_id),
+            ).limit(1)
+        )
+        b2b = b2b_result.scalar_one_or_none() is not None
+
+    return {"labels": labels, "values": values, "minutes": minutes_list, "game_ids": game_ids, "avg": avg, "field": field, "market": market, "b2b": b2b}

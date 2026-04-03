@@ -13,10 +13,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# chmod before user switch so it runs as root
+RUN chmod +x /app/scripts/start.sh
+
 # Run as non-root
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8000
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["/app/scripts/start.sh"]

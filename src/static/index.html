@@ -90,9 +90,9 @@ header h1{font-size:16px;font-weight:700}
 .chart-label{font-size:13px;font-weight:600}
 .chart-hint{font-size:11px;color:var(--muted)}
 
-/* chart wrap — display only */
-.chart-wrap{position:relative}
-.chart-wrap canvas{display:block;pointer-events:none}
+/* chart wrap */
+.chart-wrap{position:relative;cursor:pointer}
+.chart-wrap canvas{display:block}
 
 /* line control bar below chart */
 .line-control{display:flex;align-items:center;gap:14px;margin-top:12px;flex-wrap:wrap}
@@ -144,6 +144,31 @@ tbody tr:hover{background:var(--s2)}
 td{padding:7px 12px;white-space:nowrap;font-size:13px}
 .over-row td.val{color:var(--green);font-weight:600}
 .under-row td.val{color:var(--red)}
+
+/* game detail overlay */
+.gd-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:flex;align-items:center;justify-content:center}
+.gd-modal{background:var(--s1);border:1px solid var(--border);border-radius:14px;width:min(520px,95vw);max-height:90vh;overflow-y:auto;padding:22px 24px}
+.gd-back{background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;margin-bottom:14px;padding:0;display:flex;align-items:center;gap:5px}
+.gd-back:hover{color:var(--text)}
+.gd-scoreboard{display:flex;align-items:center;justify-content:center;gap:18px;margin-bottom:20px;padding:16px;background:var(--s2);border-radius:10px;border:1px solid var(--border)}
+.gd-team{text-align:center;min-width:80px}
+.gd-team-abbr{font-size:22px;font-weight:800}
+.gd-team-name{font-size:11px;color:var(--muted);margin-top:2px}
+.gd-score{font-size:36px;font-weight:900;color:var(--accent);min-width:40px;text-align:center}
+.gd-score-sep{font-size:22px;color:var(--muted);margin:0 4px}
+.gd-status{font-size:11px;color:var(--muted);text-align:center;margin-top:6px}
+.gd-player-title{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+.gd-stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.gd-stat{background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:10px 8px;text-align:center}
+.gd-stat .val{font-size:20px;font-weight:800;color:var(--text)}
+.gd-stat .lbl{font-size:10px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.3px}
+.gd-shooting{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.gd-pm{text-align:center;padding:8px;background:var(--s2);border:1px solid var(--border);border-radius:8px}
+.gd-pm .val{font-size:18px;font-weight:700}
+.gd-pm .lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
+/* clickable log rows */
+tbody tr.clickable{cursor:pointer}
+tbody tr.clickable:hover td{background:var(--s3)}
 
 /* toast */
 .toast{position:fixed;bottom:16px;right:16px;background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-size:13px;z-index:300;transition:opacity .25s}
@@ -203,6 +228,9 @@ const STATS = [
   {key:'player_blocks',   label:'BLK'},
   {key:'player_steals',   label:'STL'},
   {key:'player_turnovers',label:'TO'},
+  {key:'player_pra',      label:'PRA'},
+  {key:'player_pa',       label:'P+A'},
+  {key:'player_ra',       label:'R+A'},
 ];
 
 // ── Utils ──────────────────────────────────────────────────────────────────
@@ -230,6 +258,7 @@ window.onload = () => {
   document.getElementById('hdate').textContent =
     d.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
   loadGames();
+  document.addEventListener('keydown', e => { if (e.key==='Escape') closeGameDetail(); });
 };
 
 // ── Mode ───────────────────────────────────────────────────────────────────
@@ -343,28 +372,13 @@ async function loadPlayerDetail(p) {
   }
 }
 
-function isB2B(chartData) {
-  // Most recent game is last in the array (oldest→newest). Check if it was yesterday.
-  const labels = chartData.labels;
-  if (!labels.length) return false;
-  const last = labels[labels.length - 1]; // e.g. "04/02 vs PHX"
-  const m = last.match(/^(\d{2})\/(\d{2})/);
-  if (!m) return false;
-  const gameDate = new Date();
-  gameDate.setMonth(parseInt(m[1]) - 1);
-  gameDate.setDate(parseInt(m[2]));
-  const today = new Date();
-  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
-  return gameDate.getMonth() === yesterday.getMonth() && gameDate.getDate() === yesterday.getDate();
-}
-
 function renderDetail(p, chartData, stats) {
   const detail = document.getElementById('detail');
   const opp = p.teamAbbr===p.homeAbbr ? p.awayAbbr : p.homeAbbr;
   const s = stats.season_averages;
   const statLabel = STATS.find(x=>x.key===activeStat)?.label||'Value';
   const n = chartData.values.length;
-  const b2b = isB2B(chartData);
+  const b2b = chartData.b2b;
 
   detail.innerHTML = `
     <div class="pd">
@@ -382,9 +396,9 @@ function renderDetail(p, chartData, stats) {
 
       <div class="sample-pills">
         <button class="mpill${mode.lb===10&&!mode.h2h?' on':''}"  data-lb="10"  data-h2h="false" onclick="setMode(this)">Last 10</button>
-        <button class="mpill${mode.lb===10&&mode.h2h?' on':''}"   data-lb="10"  data-h2h="true"  onclick="setMode(this)">Last 10 H2H</button>
         <button class="mpill${mode.lb===20&&!mode.h2h?' on':''}"  data-lb="20"  data-h2h="false" onclick="setMode(this)">Last 20</button>
         <button class="mpill${mode.lb===82&&!mode.h2h?' on':''}"  data-lb="82"  data-h2h="false" onclick="setMode(this)">This Season</button>
+        <button class="mpill${mode.h2h?' on':''}"                 data-lb="82"  data-h2h="true"  onclick="setMode(this)">H2H Season</button>
       </div>
 
       <div class="chart-card">
@@ -435,11 +449,14 @@ function renderDetail(p, chartData, stats) {
         <div class="sbox"><div class="val">${s.games_played||'—'}</div><div class="lbl">GP</div></div>
       </div>` : ''}
 
-      <div class="log-card">
+      <div class="log-card" id="log-card">
         <div class="log-title">Game Log (newest first)</div>
-        ${renderLog(chartData, statLabel)}
+        <div id="log-body"></div>
       </div>
     </div>`;
+
+  // inject log separately so onclick handlers aren't escaped by innerHTML
+  document.getElementById('log-body').innerHTML = renderLog(chartData, statLabel);
 
   buildChart(chartData);
   // restore line if switching stats then back
@@ -544,7 +561,7 @@ function buildChart(chartData, line=null) {
         annotation:{annotations},
         tooltip:{enabled:false},
       },
-      events:[],
+      events:['click'],
       scales,
     },
   });
@@ -553,6 +570,16 @@ function buildChart(chartData, line=null) {
   const wrap = document.getElementById('chart-wrap');
   const h = Math.max(180, Math.min(320, 140 + values.length * 5));
   wrap.style.height = h + 'px';
+
+  // click bar → open game detail
+  ctx.onclick = (e) => {
+    const els = chartInstance.getElementsAtEventForMode(e, 'nearest', {intersect: true}, false);
+    if (!els.length) return;
+    const idx = els[0].index;
+    // chart is oldest→newest; game_ids matches that order
+    const gids = currentChartData?.game_ids;
+    if (gids && gids[idx] != null) openGameDetail(gids[idx]);
+  };
 }
 
 // ── Line input handlers ────────────────────────────────────────────────────
@@ -642,15 +669,19 @@ function clearLine() {
 
 function renderLog(chartData, statLabel) {
   if (!chartData.values.length) return '<div class="no-pl" style="padding:12px">No game log data</div>';
-  const labels = [...chartData.labels].reverse();
-  const vals   = [...chartData.values].reverse();
-  const mins   = chartData.minutes ? [...chartData.minutes].reverse() : [];
+  const labels  = [...chartData.labels].reverse();
+  const vals    = [...chartData.values].reverse();
+  const mins    = chartData.minutes  ? [...chartData.minutes].reverse()  : [];
+  const gids    = chartData.game_ids ? [...chartData.game_ids].reverse() : [];
   const hasMins = mins.length === vals.length;
+  const hasGids = gids.length === vals.length;
   const rows = labels.map((lbl,i) => {
-    const v = vals[i];
-    const m = hasMins ? mins[i] : null;
-    return `<tr id="logrow-${i}">
-      <td>${lbl}</td>
+    const v   = vals[i];
+    const m   = hasMins ? mins[i] : null;
+    const gid = hasGids ? gids[i] : null;
+    const clickable = gid != null;
+    return `<tr id="logrow-${i}" class="${clickable?'clickable':''}" ${clickable?`onclick="openGameDetail(${gid})"`:''}>
+      <td>${lbl}${clickable ? ' <span style="color:var(--muted);font-size:10px">↗</span>' : ''}</td>
       ${hasMins ? `<td class="r" style="color:var(--muted)">${m != null ? m : '—'}</td>` : ''}
       <td class="r val">${v}</td>
     </tr>`;
@@ -668,15 +699,20 @@ function renderLog(chartData, statLabel) {
 function updateLogHighlight(line) {
   // reversed order: newest first
   const vals = [...(currentChartData?.values||[])].reverse();
+  const gids = currentChartData?.game_ids ? [...currentChartData.game_ids].reverse() : [];
   vals.forEach((v, i) => {
     const row = document.getElementById(`logrow-${i}`);
     if (!row) return;
-    row.className = '';
+    const hasLink = gids[i] != null;
     const cell = row.querySelector('.val');
-    if (line==null) { if(cell) cell.style.color=''; return; }
-    if (v > line)  { row.className='over-row'; }
-    else if (v < line) { row.className='under-row'; }
-    else { if(cell) cell.style.color='var(--muted)'; }
+    if (line==null) {
+      row.className = hasLink ? 'clickable' : '';
+      if(cell) cell.style.color='';
+      return;
+    }
+    if (v > line)       row.className = 'over-row'  + (hasLink ? ' clickable' : '');
+    else if (v < line)  row.className = 'under-row' + (hasLink ? ' clickable' : '');
+    else { row.className = hasLink ? 'clickable' : ''; if(cell) cell.style.color='var(--muted)'; }
   });
 }
 
@@ -705,6 +741,106 @@ async function saveLine() {
     });
     toast('Line saved!');
   } catch(e) { toast('Save failed','err'); }
+}
+
+// ── Game detail modal ──────────────────────────────────────────────────────
+
+async function openGameDetail(gameId) {
+  if (!activePlayer) return;
+  // show overlay with spinner
+  let overlay = document.getElementById('gd-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'gd-overlay';
+    overlay.className = 'gd-overlay';
+    overlay.innerHTML = '<div class="gd-modal"><div class="loading" style="padding:40px"><span class="spin"></span>Loading…</div></div>';
+    overlay.addEventListener('click', e => { if (e.target===overlay) closeGameDetail(); });
+    document.body.appendChild(overlay);
+  }
+  overlay.style.display = 'flex';
+
+  try {
+    const data = await api(`/games/${gameId}/boxscore/${activePlayer.id}`);
+    renderGameDetail(overlay, data);
+  } catch(e) {
+    overlay.querySelector('.gd-modal').innerHTML = `
+      <button class="gd-back" onclick="closeGameDetail()">← Back</button>
+      <div style="color:var(--muted);padding:20px">Could not load game data.</div>`;
+  }
+}
+
+function closeGameDetail() {
+  const overlay = document.getElementById('gd-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+const B2B_TAG = '<span style="background:#7c2d12;color:#fca5a5;font-size:10px;padding:1px 6px;border-radius:3px;font-weight:700;letter-spacing:.3px;margin-left:5px">B2B</span>';
+
+function renderGameDetail(overlay, data) {
+  const g = data.game;
+  const b = data.boxscore;
+  const p = data.player;
+
+  const hasScore = g.home_score != null && g.away_score != null;
+  const homeWin  = hasScore && g.home_score > g.away_score;
+  const awayWin  = hasScore && g.away_score > g.home_score;
+
+  const scoreHTML = hasScore
+    ? `<div class="gd-score" style="${awayWin?'':'opacity:.45'}">${g.away_score}</div>
+       <div class="gd-score-sep">–</div>
+       <div class="gd-score" style="${homeWin?'':'opacity:.45'}">${g.home_score}</div>`
+    : `<div class="gd-score" style="color:var(--muted);font-size:20px">${g.status}</div>`;
+
+  const stat = (val, na='—') => val != null ? val : na;
+  const pct  = (val) => val != null ? val+'%' : '—';
+  const pm   = (val) => val == null ? '—' : (val > 0 ? '+'+val : String(val));
+  const pmColor = b?.plus_minus > 0 ? 'var(--green)' : b?.plus_minus < 0 ? 'var(--red)' : 'var(--muted)';
+
+  const pra = b ? (b.points??0)+(b.rebounds??0)+(b.assists??0) : null;
+  const pa  = b ? (b.points??0)+(b.assists??0) : null;
+  const ra  = b ? (b.rebounds??0)+(b.assists??0) : null;
+
+  const boxHTML = b ? `
+    <div class="gd-player-title">${p.name}</div>
+    <div class="gd-stats-grid">
+      <div class="gd-stat"><div class="val">${stat(b.points)}</div><div class="lbl">PTS</div></div>
+      <div class="gd-stat"><div class="val">${stat(b.rebounds)}</div><div class="lbl">REB</div></div>
+      <div class="gd-stat"><div class="val">${stat(b.assists)}</div><div class="lbl">AST</div></div>
+      <div class="gd-stat"><div class="val">${stat(b.minutes)}</div><div class="lbl">MIN</div></div>
+      <div class="gd-stat"><div class="val">${stat(b.steals)}</div><div class="lbl">STL</div></div>
+      <div class="gd-stat"><div class="val">${stat(b.blocks)}</div><div class="lbl">BLK</div></div>
+      <div class="gd-stat"><div class="val">${stat(b.turnovers)}</div><div class="lbl">TO</div></div>
+      <div class="gd-stat"><div class="val" style="color:${pmColor}">${pm(b.plus_minus)}</div><div class="lbl">+/−</div></div>
+    </div>
+    <div class="gd-shooting" style="grid-template-columns:repeat(3,1fr);margin-bottom:8px">
+      <div class="gd-stat"><div class="val">${pra}</div><div class="lbl">PRA</div></div>
+      <div class="gd-stat"><div class="val">${pa}</div><div class="lbl">P+A</div></div>
+      <div class="gd-stat"><div class="val">${ra}</div><div class="lbl">R+A</div></div>
+    </div>
+    <div class="gd-shooting">
+      <div class="gd-stat"><div class="val">${stat(b.fg_made)}/${stat(b.fg_attempted)}</div><div class="lbl">FG · ${pct(b.fg_pct)}</div></div>
+      <div class="gd-stat"><div class="val">${stat(b.fg3_made)}/${stat(b.fg3_attempted)}</div><div class="lbl">3PT · ${pct(b.fg3_pct)}</div></div>
+      <div class="gd-stat"><div class="val">${stat(b.ft_made)}/${stat(b.ft_attempted)}</div><div class="lbl">FT · ${pct(b.ft_pct)}</div></div>
+    </div>` : `<div style="color:var(--muted);font-size:13px;padding:10px 0">No box score data for this game.</div>`;
+
+  overlay.querySelector('.gd-modal').innerHTML = `
+    <button class="gd-back" onclick="closeGameDetail()">← Back to player</button>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">${g.date}</div>
+    <div class="gd-scoreboard">
+      <div class="gd-team">
+        <div class="gd-team-abbr" style="${awayWin?'':'opacity:.5'}">${g.away_team_abbr||'?'}</div>
+        <div class="gd-team-name">${g.away_team_name||''}</div>
+        ${g.away_b2b ? B2B_TAG : ''}
+      </div>
+      ${scoreHTML}
+      <div class="gd-team">
+        <div class="gd-team-abbr" style="${homeWin?'':'opacity:.5'}">${g.home_team_abbr||'?'}</div>
+        <div class="gd-team-name">${g.home_team_name||''}</div>
+        ${g.home_b2b ? B2B_TAG : ''}
+      </div>
+    </div>
+    ${hasScore ? `<div class="gd-status">${g.status}</div>` : ''}
+    <div style="margin-top:18px">${boxHTML}</div>`;
 }
 
 // ── Refresh ────────────────────────────────────────────────────────────────

@@ -22,7 +22,8 @@ httpx>=0.28.0
 apscheduler>=3.10.4
 
 # NBA stats (unofficial stats.nba.com wrapper)
-nba-api>=1.4.0
+# 1.11+ required: per_mode_detailed / measure_type_detailed_defense param names
+nba-api>=1.11.0
 
 # Injury PDF parsing
 pdfplumber>=0.11.0

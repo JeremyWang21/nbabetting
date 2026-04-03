@@ -25,7 +25,8 @@ Built to be fast, accurate, and deployable to AWS.
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                      Client / Browser                    │
-│              (FastAPI /docs Swagger UI for now)          │
+│    Single-page dashboard (src/static/index.html)         │
+│    Chart.js bar charts · stat tabs · line entry          │
 └─────────────────────────────┬───────────────────────────┘
                               │  HTTP
 ┌─────────────────────────────▼───────────────────────────┐
@@ -59,7 +60,7 @@ Built to be fast, accurate, and deployable to AWS.
 
 | Source | Cost | Refresh | Provides |
 |---|---|---|---|
-| [nba_api](https://github.com/swar/nba_api) | Free | Nightly 4–5am | Game logs, season averages, schedules, defensive stats, rosters |
+| [nba_api](https://github.com/swar/nba_api) ≥1.11 | Free | Nightly 4–5am | Game logs, season averages, schedules, defensive stats, rosters |
 | [Tank01 RapidAPI Pro](https://rapidapi.com/tank01/api/tank01-fantasy-stats) | $10/mo | Every 15 min | Injury status (OUT/GTD/Q), live rosters |
 | NBA Official Injury PDF | Free | Daily ~5pm ET | Formal pre-game injury designations |
 
@@ -160,7 +161,8 @@ nbabetting/
     │   └── odds_ingester.py       # Stub — reserved if odds API added later
     └── utils/
         ├── http_client.py         # Shared httpx AsyncClient with retries
-        └── rate_limiter.py        # 0.6s token bucket for stats.nba.com
+        ├── rate_limiter.py        # 0.6s token bucket for stats.nba.com
+        └── date_utils.py          # today_et(): DST-aware US Eastern date via ZoneInfo
 ```
 
 ---
@@ -229,10 +231,14 @@ prop_snapshots                            ← reserved for future odds API
 | Method | Path | Description |
 |---|---|---|
 | GET | `/health` | Health check |
-| GET | `/api/v1/games/today` | Today's schedule with scores/status |
+| GET | `/api/v1/games/today` | Today's schedule (auto-advances to tomorrow when all Final) |
+| GET | `/api/v1/games/{id}/players` | Active players for both teams, with injury status |
+| GET | `/api/v1/games/{id}/props` | Best prop lines for a game |
 | GET | `/api/v1/players/search?q=` | Search players by name |
+| GET | `/api/v1/players/by-team/{team_id}` | All active players for a team |
 | GET | `/api/v1/players/{id}/stats` | Season averages + 5 recent games |
 | GET | `/api/v1/players/{id}/gamelogs?limit=10` | Paginated game log with opponent |
+| GET | `/api/v1/players/{id}/chart-data?market=&lookback=&opponent_team_id=` | Per-game values + labels for Chart.js |
 | GET | `/api/v1/projections/today` | All matchup-adjusted projections for today |
 | GET | `/api/v1/projections/{id}?game_id=` | All markets for one player |
 | GET | `/api/v1/projections/{id}/{market}?game_id=` | Single market projection |
@@ -247,6 +253,7 @@ prop_snapshots                            ← reserved for future odds API
 | DELETE | `/api/v1/admin/cache?pattern=` | Flush cache keys (default: all) |
 | GET | `/api/v1/admin/scheduler` | Job list + next run times |
 | POST | `/api/v1/admin/scheduler/{job_id}/run` | Trigger a job immediately |
+| POST | `/api/v1/admin/refresh-today` | Flush games cache + re-ingest today's scoreboard |
 
 ---
 
@@ -344,7 +351,8 @@ docker-compose up --build
 docker-compose exec app alembic upgrade head
 docker-compose exec app python scripts/bootstrap.py
 curl http://localhost:8000/health
-# browse http://localhost:8000/docs
+# browse http://localhost:8000/         ← dashboard UI
+# browse http://localhost:8000/docs     ← Swagger API explorer
 ```
 
 ### Phase 2 — Push image to ECR
@@ -420,3 +428,9 @@ Push to `main` → `.github/workflows/deploy.yml` builds, pushes to ECR, forces 
 **`prop_snapshots` kept but unused** — schema is in place for a future odds API integration without a migration. Currently empty.
 
 **`custom_lines` is free-text bookmaker** — no enum; you can type anything ("DraftKings", "my bookie", "Caesars"). Flexible for personal use.
+
+**Single-page dashboard UI** — `src/static/index.html` served as a static file. Sidebar shows today's games; clicking a game loads rosters grouped by team. Clicking a player opens a detail panel with Chart.js bar charts, stat tabs (PTS/REB/AST/3PM/BLK/STL/TO), season average reference line, and a manual line input (arrow keys increment by 0.5). Mode bar switches between This Season / Last 10 H2H / Last 10 / Last 20.
+
+**US Eastern time for all dates** — the container runs UTC but NBA game dates are ET. `src/utils/date_utils.py` provides `today_et()` using `zoneinfo.ZoneInfo("America/New_York")` for correct DST handling (EDT in summer, EST in winter). All ingesters and services use this instead of `date.today()`.
+
+**Tomorrow's slate auto-advance** — `game_service.py` checks if all of today's games are Final; if so, it fetches and returns tomorrow's upcoming slate instead. `ingest_todays_games` pre-seeds tomorrow's schedule via `_ingest_date_schedule()` when today's games all finish.

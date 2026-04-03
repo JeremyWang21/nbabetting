@@ -125,7 +125,10 @@ async def ingest_todays_games() -> None:
     finished = {"final", "final/ot", "final/2ot", "final/3ot"}
     if games_raw and all(g.get("gameStatusText", "").lower() in finished for g in games_raw):
         logger.info("ingest_todays_games: all done — pre-fetching tomorrow's schedule")
-        await _ingest_date_schedule(today_et() + timedelta(days=1))
+        try:
+            await _ingest_date_schedule(today_et() + timedelta(days=1))
+        except Exception as exc:
+            logger.warning("ingest_todays_games: tomorrow pre-fetch failed (%s)", exc)
 
 
 async def _ingest_date_schedule(target_date: date) -> None:

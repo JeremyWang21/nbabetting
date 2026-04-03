@@ -190,7 +190,6 @@ tbody tr.clickable:hover td{background:var(--s3)}
     <span class="hdate" id="hdate"></span>
   </div>
   <div class="spacer"></div>
-  <button class="btn btn-ghost" id="refresh-btn" onclick="hardRefresh()">↻ Refresh</button>
 </header>
 
 
@@ -843,18 +842,6 @@ function renderGameDetail(overlay, data) {
     <div style="margin-top:18px">${boxHTML}</div>`;
 }
 
-// ── Refresh ────────────────────────────────────────────────────────────────
-
-async function hardRefresh() {
-  const btn = document.getElementById('refresh-btn');
-  btn.textContent='↻ Syncing…'; btn.disabled=true;
-  try {
-    await api('/admin/refresh-today',{method:'POST'});
-    await loadGames();
-    if (activePlayer) loadPlayerDetail(activePlayer);
-  } catch(e) { toast('Refresh failed','err'); }
-  finally { btn.textContent='↻ Refresh'; btn.disabled=false; }
-}
 </script>
 </body>
 </html>

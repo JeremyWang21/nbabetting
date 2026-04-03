@@ -22,16 +22,22 @@ class GameService:
         if cached is not None:
             return TodaysGamesResponse.model_validate(cached)
 
-        today = today_et()
-        games, display_date = await self._fetch_games_for_date(today)
-
-        # If every game today is finished, show tomorrow's upcoming slate
         finished = {"final", "final/ot", "final/2ot", "final/3ot"}
-        if games and all(g.status.lower() in finished for g in games):
+        today = today_et()
+        all_today, _ = await self._fetch_games_for_date(today)
+        upcoming_today = [g for g in all_today if g.status.lower() not in finished]
+        display_date = today
+
+        if upcoming_today:
+            # Games still in progress or not yet started today
+            games = upcoming_today
+        elif all_today:
+            # All of today's games are done — show full tomorrow slate
             tomorrow = today + timedelta(days=1)
-            next_games, _ = await self._fetch_games_for_date(tomorrow)
-            if next_games:
-                games, display_date = next_games, tomorrow
+            all_tomorrow, _ = await self._fetch_games_for_date(tomorrow)
+            games, display_date = (all_tomorrow, tomorrow) if all_tomorrow else ([], today)
+        else:
+            games = []
 
         enriched = await self._enrich(games)
         response = TodaysGamesResponse(date=display_date, games=enriched, count=len(enriched))

@@ -41,18 +41,12 @@ class CustomLineCreate(BaseModel):
     player_id: int
     game_id: int
     market_key: str
-    bookmaker: str | None = None
     over_line: float
-    over_price: int | None = None
-    under_price: int | None = None
     notes: str | None = None
 
 
 class CustomLineUpdate(BaseModel):
-    bookmaker: str | None = None
     over_line: float | None = None
-    over_price: int | None = None
-    under_price: int | None = None
     notes: str | None = None
 
 
@@ -62,10 +56,7 @@ class CustomLineResponse(BaseModel):
     player_name: str | None = None
     game_id: int
     market_key: str
-    bookmaker: str | None
     over_line: float
-    over_price: int | None
-    under_price: int | None
     notes: str | None
     created_at: datetime
     updated_at: datetime
@@ -83,13 +74,9 @@ class ComparisonRow(BaseModel):
     game_date: date
     opponent: str | None
     market_key: str
-    bookmaker: str | None
     custom_line_id: int
 
-    # Your bookie's number
     your_line: float
-    your_over_price: int | None
-    your_under_price: int | None
 
     # Statistical projection
     projected_value: float          # EWMA base (before matchup)
@@ -116,9 +103,6 @@ class ComparisonRow(BaseModel):
     @computed_field
     @property
     def lean(self) -> str:
-        """Simple directional lean based on edge."""
-        if abs(self.edge) < 0.5:
-            return "push"
         return "over" if self.edge > 0 else "under"
 
     notes: str | None

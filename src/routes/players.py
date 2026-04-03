@@ -49,12 +49,13 @@ async def get_player_chart_data(
     market: str = Query("player_points"),
     lookback: int = Query(15, ge=3, le=82),
     opponent_team_id: int | None = Query(None),
+    min_minutes: float = Query(0, ge=0, le=60),
     db: AsyncSession = Depends(get_db),
 ):
     """Return per-game values + dates for charting, plus season average for reference line."""
     field = MARKET_TO_FIELD.get(market)
     if field is None:
-        return {"labels": [], "values": [], "avg": None}
+        return {"labels": [], "values": [], "minutes": [], "avg": None}
 
     conditions = [
         PlayerGameLog.player_id == player_id,
@@ -70,7 +71,7 @@ async def get_player_chart_data(
         .join(Game, PlayerGameLog.game_id == Game.id)
         .where(*conditions)
         .order_by(Game.game_date.desc())
-        .limit(lookback)
+        .limit(lookback * 3 if min_minutes > 0 else lookback)  # fetch extra to allow filtering
     )
     rows = result.all()
 
@@ -87,14 +88,19 @@ async def get_player_chart_data(
 
     # reverse so oldest → newest for chart
     rows = list(reversed(rows))
-    labels, values, opps = [], [], []
+    labels, values, minutes_list = [], [], []
     for row in rows:
         log, gdate, home_tid, away_tid = row[0], row.game_date, row.home_team_id, row.away_team_id
+        mins = float(log.minutes) if log.minutes is not None else 0.0
+        if min_minutes > 0 and mins < min_minutes:
+            continue
+        if len(values) >= lookback:
+            break
         opp_id = away_tid if player_team_id and home_tid == player_team_id else home_tid
         opp = team_abbr.get(opp_id, "?")
         labels.append(f"{gdate.strftime('%m/%d')} vs {opp}")
         values.append(float(getattr(log, field)))
-        opps.append(opp)
+        minutes_list.append(mins)
 
     avg = round(sum(values) / len(values), 1) if values else None
-    return {"labels": labels, "values": values, "avg": avg, "field": field, "market": market}
+    return {"labels": labels, "values": values, "minutes": minutes_list, "avg": avg, "field": field, "market": market}

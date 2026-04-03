@@ -427,7 +427,7 @@ Push to `main` → `.github/workflows/deploy.yml` builds, pushes to ECR, forces 
 
 **`prop_snapshots` kept but unused** — schema is in place for a future odds API integration without a migration. Currently empty.
 
-**`custom_lines` is free-text bookmaker** — no enum; you can type anything ("DraftKings", "my bookie", "Caesars"). Flexible for personal use.
+**`custom_lines` stores only the line value** — no bookmaker, no odds prices. Just player, game, market, and the number you want to track.
 
 **Single-page dashboard UI** — `src/static/index.html` served as a static file. Sidebar shows today's games; clicking a game loads rosters grouped by team. Clicking a player opens a detail panel with Chart.js bar charts, stat tabs (PTS/REB/AST/3PM/BLK/STL/TO), season average reference line, and a manual line input (arrow keys increment by 0.5). Mode bar switches between This Season / Last 10 H2H / Last 10 / Last 20.
 

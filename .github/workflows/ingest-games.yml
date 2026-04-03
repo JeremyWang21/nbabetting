@@ -33,7 +33,7 @@ jobs:
       - name: Run game ingestion
         env:
           DATABASE_URL: postgresql+asyncpg://nbabetting:${{ secrets.DB_PASSWORD }}@localhost:5432/nbabetting
-          REDIS_URL: redis://localhost
+          REDIS_URL: redis://localhost:6379/0
         run: |
           python -c "
           import asyncio

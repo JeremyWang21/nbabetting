@@ -1,10 +1,10 @@
-# NBA Betting Dashboard — Design Document
+# NBA Betting Stats Dashboard — Design Document
 
 ## Overview
 
-A props.cash-style personal dashboard that aggregates NBA player stats, computes
-statistical projections, and lets you compare them against your bookmaker's lines.
-Built to be fast, accurate, and deployable to AWS.
+A personal dashboard that aggregates NBA player stats, computes statistical projections,
+and lets you compare them against your bookmaker's lines. Built to learn APIs, Docker,
+and AWS deployment. Live at **https://jprops.xyz**.
 
 ---
 
@@ -12,11 +12,11 @@ Built to be fast, accurate, and deployable to AWS.
 
 | Goal | Detail |
 |---|---|
-| Personal use | Access from anywhere via a deployed API |
-| Learning | APIs, Docker, AWS (ECR + ECS Fargate + RDS) |
+| Personal use | Access from anywhere via deployed server |
+| Learning | APIs, Docker, AWS (EC2), GitHub Actions CI/CD |
 | Data coverage | Projections, custom line entry, game logs, season stats, injuries, matchup data |
 | Speed | Redis cache keeps hot endpoints under 10ms |
-| Cost | ~$10/month in API subscriptions + ~$33/month AWS |
+| Cost | ~$10/month API + ~$8/month EC2 t3.micro |
 
 ---
 
@@ -28,24 +28,30 @@ Built to be fast, accurate, and deployable to AWS.
 │    Single-page dashboard (src/static/index.html)         │
 │    Chart.js bar charts · stat tabs · line entry          │
 └─────────────────────────────┬───────────────────────────┘
-                              │  HTTP
+                              │  HTTPS (nginx + certbot)
 ┌─────────────────────────────▼───────────────────────────┐
-│                    FastAPI Application                    │
+│              EC2 t3.micro (Ubuntu, /app)                  │
 │                                                          │
-│  Routes → Services → (Redis cache-aside) → PostgreSQL   │
+│  [nginx] ──▶ [FastAPI app container]                     │
+│                  Routes → Services → Redis → PostgreSQL  │
+│                  APScheduler (injury ingest only)        │
 │                                                          │
-│  Background Scheduler (APScheduler AsyncIOScheduler)     │
-│    runs inside the same process                          │
-└────┬──────────────────────────────────────────────┬──────┘
-     │ writes                                        │ reads
-┌────▼──────┐                              ┌─────────▼──────┐
-│ PostgreSQL│                              │   Redis 7       │
-│ (RDS)     │                              │ (container /    │
-│ permanent │                              │  local only)    │
-└───────────┘                              └────────────────┘
-     ▲
-     │ ingesters poll external APIs
-┌────┴─────────────────────────────────────────────────────┐
+│  [postgres container]   [redis container]                │
+└──────────────────────────────────────────────────────────┘
+         ▲
+         │ SSH tunnel (port-forward 5432)
+┌────────┴─────────────────────────────────────────────────┐
+│              GitHub Actions (ingestion runners)           │
+│                                                          │
+│  ingest-games.yml   — every 30 min during game hours     │
+│  ingest-nightly.yml — daily 4am ET                       │
+│                                                          │
+│  stats.nba.com is reachable from GitHub IPs (blocked     │
+│  on AWS IP ranges), so all nba_api calls run here.       │
+│  Data written back to EC2 postgres via SSH tunnel.       │
+└──────────────────────────────────────────────────────────┘
+         │ nba_api calls
+┌────────▼─────────────────────────────────────────────────┐
 │  External Data Sources                                   │
 │                                                          │
 │  nba_api  → game logs, season averages, schedules (free) │
@@ -60,8 +66,8 @@ Built to be fast, accurate, and deployable to AWS.
 
 | Source | Cost | Refresh | Provides |
 |---|---|---|---|
-| [nba_api](https://github.com/swar/nba_api) ≥1.11 | Free | Nightly 4–5am | Game logs, season averages, schedules, defensive stats, rosters |
-| [Tank01 RapidAPI Pro](https://rapidapi.com/tank01/api/tank01-fantasy-stats) | $10/mo | Every 15 min | Injury status (OUT/GTD/Q), live rosters |
+| [nba_api](https://github.com/swar/nba_api) ≥1.11 | Free | Via GitHub Actions | Game logs, season averages, schedules, defensive stats, rosters |
+| [Tank01 RapidAPI Pro](https://rapidapi.com/tank01/api/tank01-fantasy-stats) | $10/mo | Every 15 min (APScheduler) | Injury status (OUT/GTD/Q), live rosters |
 | NBA Official Injury PDF | Free | Daily ~5pm ET | Formal pre-game injury designations |
 
 **Total API cost: ~$10/month**
@@ -79,14 +85,22 @@ from the stats already in the database.
 | Web framework | FastAPI | Async-native, auto `/docs`, Pydantic built-in |
 | ORM | SQLAlchemy 2.0 async + asyncpg | Type-safe queries, Alembic migrations |
 | Migrations | Alembic | Schema versioning, async support |
-| Cache | Redis 7 + redis-py async (local only — not on AWS) | Sub-millisecond TTL cache in dev/local |
-| Scheduler | APScheduler **3.10.x** (AsyncIOScheduler) | Periodic polling without Celery overhead — must use 3.x, not 4.x |
+| Cache | Redis 7 + redis-py async | Sub-millisecond TTL cache; runs as Docker container on EC2 |
+| Scheduler | APScheduler **3.10.x** (AsyncIOScheduler) | Injury ingest only — must use 3.x, not 4.x |
 | HTTP client | httpx async | Tank01 API calls, retries, timeouts |
 | Settings | Pydantic BaseSettings | Typed env vars, `.env` file |
 | Container | Docker + Docker Compose | Dev/prod parity |
-| Registry | AWS ECR | Docker image storage |
-| Compute | AWS ECS Fargate | Serverless containers, no EC2 to manage |
-| Database | AWS RDS PostgreSQL 16 | Managed Postgres |
+| Compute | AWS EC2 t3.micro | ~$8/mo; persistent process needed for APScheduler |
+| Reverse proxy | nginx + certbot | HTTPS via Let's Encrypt, terminates TLS |
+| CI/CD | GitHub Actions | Deploy on push + scheduled data ingestion |
+
+**Why EC2 over ECS/Lambda:** APScheduler runs inside the FastAPI process and needs a
+persistent container. Lambda is stateless and can't maintain the scheduler. ECS Fargate
+would work but costs more for a single personal-use instance.
+
+**Why GitHub Actions for ingestion:** stats.nba.com blocks AWS IP ranges. GitHub Actions
+runners use non-blocked IPs, so all nba_api calls are made from there via SSH tunnel
+back to the EC2 postgres.
 
 ---
 
@@ -96,18 +110,20 @@ from the stats already in the database.
 nbabetting/
 ├── Dockerfile
 ├── docker-compose.yml             # Local dev: app + postgres + redis
-├── docker-compose.prod.yml        # Production overrides (points at RDS; Redis runs as a sidecar container)
+├── docker-compose.prod.yml        # EC2 production: app + postgres + redis (restart: unless-stopped)
 ├── requirements.txt
 ├── requirements-dev.txt
 ├── alembic.ini
 ├── scripts/
 │   └── bootstrap.py               # One-time seed: teams → players → stats → matchup data
 ├── deploy/
-│   ├── task-definition.json       # ECS task definition template
-│   └── ecs-update.sh              # Helper: force new ECS deployment
+│   ├── task-definition.json       # ECS task definition (legacy, not currently used)
+│   └── ecs-update.sh              # ECS helper (legacy)
 ├── .github/
 │   └── workflows/
-│       └── deploy.yml             # CI/CD: build → push ECR → update ECS on push to main
+│       ├── deploy.yml             # Push to main → build image → SSH pull + rebuild on EC2
+│       ├── ingest-games.yml       # Every 30 min (6pm–8am UTC): live scores via SSH tunnel
+│       └── ingest-nightly.yml     # Daily 8am UTC (4am ET): game logs, averages, rosters
 ├── alembic/
 │   └── versions/
 │       ├── 001_initial_schema.py
@@ -122,7 +138,7 @@ nbabetting/
     │   └── session.py             # Async engine, get_db dependency
     ├── cache/
     │   ├── keys.py                # All key names, TTLs, bust patterns
-    │   └── redis_client.py        # cache_get / cache_set / cache_delete helpers
+    │   └── redis_client.py        # cache_get / cache_set / cache_delete (all fail-silently)
     ├── models/
     │   ├── player.py
     │   ├── team.py
@@ -153,9 +169,9 @@ nbabetting/
     │   ├── custom_line_service.py # CRUD + compare (projection vs your line)
     │   └── injury_service.py
     ├── ingestion/
-    │   ├── scheduler.py
-    │   ├── nba_stats_ingester.py  # schedule, game logs, season averages
-    │   ├── defensive_stats_ingester.py  # opponent stats per team (matchup data)
+    │   ├── scheduler.py           # APScheduler — injury ingest only (in-process)
+    │   ├── nba_stats_ingester.py  # schedule, game logs, season averages (run via GitHub Actions)
+    │   ├── defensive_stats_ingester.py  # opponent stats per team
     │   ├── roster_ingester.py     # players + teams (nba_api static)
     │   ├── injury_ingester.py     # Tank01 + NBA PDF
     │   └── odds_ingester.py       # Stub — reserved if odds API added later
@@ -253,17 +269,18 @@ prop_snapshots                            ← reserved for future odds API
 | DELETE | `/api/v1/admin/cache?pattern=` | Flush cache keys (default: all) |
 | GET | `/api/v1/admin/scheduler` | Job list + next run times |
 | POST | `/api/v1/admin/scheduler/{job_id}/run` | Trigger a job immediately |
-| POST | `/api/v1/admin/refresh-today` | Flush games cache + re-ingest today's scoreboard |
 
 ---
 
 ## Caching Strategy
 
 Cache-aside throughout: check Redis first; on miss, query Postgres, write to Redis, return.
+All Redis operations fail silently (try/except) so ingestion scripts work even when Redis
+is unavailable (e.g. GitHub Actions runners).
 
 | Redis Key | TTL | Busted by |
 |---|---|---|
-| `games:today` | 30 min | `ingest_todays_games` |
+| `games:today` | 30 min | `ingest_todays_games` + admin cache flush |
 | `player:stats:{id}` | 6 hours | `ingest_game_logs`, `ingest_season_averages` |
 | `player:gamelogs:{id}:{limit}` | 6 hours | `ingest_game_logs` |
 | `projections:today:{lookback}` | 30 min | `ingest_game_logs`, `ingest_defensive_stats` |
@@ -272,18 +289,47 @@ Cache-aside throughout: check Redis first; on miss, query Postgres, write to Red
 
 ---
 
-## Background Scheduler Jobs
+## Ingestion Strategy
+
+stats.nba.com blocks AWS IP ranges. To work around this:
+
+- **nba_api ingestion** runs exclusively from **GitHub Actions** runners (non-blocked IPs)
+- Data is written to EC2 postgres via an **SSH tunnel** (port-forward 5432)
+- After writing, the workflow flushes the relevant Redis keys on EC2 via the admin API
+- **Tank01 / injury ingestion** runs inside the FastAPI process via APScheduler (Tank01 is not IP-restricted)
+
+### GitHub Actions Workflows
+
+| Workflow | Schedule | What it runs |
+|---|---|---|
+| `ingest-games.yml` | Every 30 min, 6pm–8am UTC | `ingest_todays_games()` — live scores |
+| `ingest-nightly.yml` | Daily 8am UTC (4am ET) | `ingest_game_logs` → `ingest_season_averages` → `ingest_defensive_stats` → `ingest_roster_updates` → `ingest_todays_games` |
+
+Both workflows:
+1. Spin up a Redis service container (so cache calls don't error)
+2. Open SSH tunnel to EC2 postgres on `localhost:5432`
+3. Run Python ingestion with `DATABASE_URL` pointing at tunnel
+4. Call `DELETE /api/v1/admin/cache` to bust EC2 Redis after writes
+
+### Required GitHub Secrets
+
+| Secret | Value |
+|---|---|
+| `EC2_SSH_KEY` | Contents of the EC2 `.pem` key |
+| `EC2_HOST` | EC2 public IP |
+| `DB_PASSWORD` | Postgres password |
+| `ADMIN_SECRET` | Header secret for admin endpoints |
+
+---
+
+## Background Scheduler Jobs (in-process, APScheduler)
 
 | Job | Trigger | Source |
 |---|---|---|
-| `ingest_todays_games` | Every 30 min | nba_api live scoreboard |
 | `ingest_injury_report` | Every 15 min | Tank01 + NBA PDF |
-| `ingest_game_logs` | Daily 4:00am | nba_api LeagueGameLog |
-| `ingest_season_averages` | Daily 4:30am | nba_api LeagueDashPlayerStats |
-| `ingest_defensive_stats` | Daily 5:00am | nba_api LeagueDashTeamStats (Opponent + Advanced) |
-| `ingest_roster_updates` | Daily 6:00am | nba_api static + CommonAllPlayers |
 
-All jobs run inside the FastAPI process via `lifespan`. No Celery, no separate worker.
+nba_api jobs (game logs, season averages, defensive stats, roster updates, today's schedule)
+are handled by GitHub Actions — not APScheduler — due to IP blocking on EC2.
 
 ---
 
@@ -323,13 +369,15 @@ Not applied to: `player_blocks`, `player_steals`, `player_turnovers` (player-sid
 ## Data Flow
 
 ```
-  nba_api          ──▶  nba_stats_ingester     ──▶  games, game_logs, season_avgs
-  nba_api          ──▶  defensive_stats_ingester ──▶  team_defensive_stats
-  nba_api static   ──▶  roster_ingester         ──▶  players, teams
-  Tank01 + PDF     ──▶  injury_ingester         ──▶  injury_reports
-                                  │
-                           bust Redis keys
-                                  │
+  GitHub Actions runner
+    → nba_api call (stats.nba.com)
+    → SSH tunnel → EC2 postgres write
+    → curl DELETE /admin/cache → EC2 Redis flush
+
+  Tank01 (in-process APScheduler)
+    → httpx → Tank01 API
+    → postgres write → Redis bust
+
   GET /projections/today
     → cache miss → DB query → EWMA + matchup → write cache → return
     → cache hit  → deserialize → return (< 5ms)
@@ -342,95 +390,99 @@ Not applied to: `player_blocks`, `player_steals`, `player_turnovers` (player-sid
 
 ---
 
-## AWS Deployment Path
+## Deployment
 
-### Phase 1 — Local Docker ✅ (start here)
-```bash
-cp .env.example .env          # fill in TANK01_API_KEY
-docker-compose up --build
-docker-compose exec app alembic upgrade head
-docker-compose exec app python scripts/bootstrap.py
-curl http://localhost:8000/health
-# browse http://localhost:8000/         ← dashboard UI
-# browse http://localhost:8000/docs     ← Swagger API explorer
+### Live Setup
+
+- **Domain**: jprops.xyz (HTTPS via Let's Encrypt / certbot)
+- **Server**: AWS EC2 t3.micro, Ubuntu, `/app` directory
+- **Stack**: `docker-compose.prod.yml` — three containers: `app`, `postgres`, `redis`
+- **Reverse proxy**: nginx on host, forwards `jprops.xyz` → `localhost:8000`
+- **TLS**: certbot auto-renews Let's Encrypt cert
+
+### Deploying code changes
+
+Push to `main` → `deploy.yml` runs:
+```
+git pull on EC2 → docker-compose up --build -d app
 ```
 
-### Phase 2 — Push image to ECR
+Or manually:
 ```bash
-aws ecr create-repository --repository-name nbabetting --region us-east-1
-
-aws ecr get-login-password --region us-east-1 \
-  | docker login --username AWS --password-stdin \
-    <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
-
-docker build -t nbabetting .
-docker tag nbabetting:latest \
-  <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/nbabetting:latest
-docker push \
-  <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/nbabetting:latest
+ssh -i ~/Downloads/<key>.pem ec2-user@<EC2_IP> \
+  "sudo git -C /app pull && sudo docker-compose -f /app/docker-compose.prod.yml up --build -d app"
 ```
 
-### Phase 3 — RDS
-```bash
-# Create RDS PostgreSQL (db.t3.micro, ~$20/month)
-# Redis runs as a sidecar container in the ECS task — no ElastiCache needed.
+### Initial EC2 Setup (one-time)
 
-# Run migrations against RDS (temporarily allow your IP in the security group)
-DATABASE_URL=postgresql+asyncpg://user:pass@<rds-endpoint>:5432/nbabetting \
-  alembic upgrade head
+```bash
+# On EC2
+sudo yum install -y docker git
+sudo systemctl start docker
+sudo usermod -aG docker ec2-user
+
+# Install docker-compose
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64" \
+  -o /usr/local/bin/docker-compose && sudo chmod +x /usr/local/bin/docker-compose
+
+# Clone and start
+sudo git clone https://github.com/JeremyWang21/nbabetting /app
+cd /app && cp .env.example .env  # fill in secrets
+sudo docker-compose -f docker-compose.prod.yml up --build -d
+sudo docker-compose -f docker-compose.prod.yml exec app alembic upgrade head
+sudo docker-compose -f docker-compose.prod.yml exec app python scripts/bootstrap.py
+
+# nginx + certbot
+sudo yum install -y nginx certbot python3-certbot-nginx
+sudo certbot --nginx -d jprops.xyz
 ```
 
-### Phase 4 — ECS Fargate
-- Use `deploy/task-definition.json` as the template
-- Inject secrets from AWS SSM Parameter Store (never hardcode in task def)
-- 0.25 vCPU / 512 MB / 1 task — sufficient for personal use
-- No load balancer needed initially; use the Fargate public IP
-
-### Phase 5 — CI/CD (GitHub Actions)
-Push to `main` → `.github/workflows/deploy.yml` builds, pushes to ECR, forces new ECS deployment automatically.
-
-### AWS steady-state cost
+### AWS cost
 
 | Service | Config | Monthly |
 |---|---|---|
-| ECS Fargate | 0.25 vCPU / 512 MB, 1 task (app + Redis sidecar) | ~$10 |
-| RDS PostgreSQL | db.t3.micro, 20 GB | ~$20 |
-| ECR | Image storage | ~$1 |
-| Data transfer | Personal use | ~$2 |
-| **Total** | | **~$33** |
-
----
-
-## Sprint Plan
-
-| Sprint | Deliverable | Status |
-|---|---|---|
-| 1 | Skeleton: Docker, Alembic, all models/routes/services | ✅ |
-| 2 | nba_api ingestion → `/games/today`, `/players/{id}/gamelogs` | ✅ |
-| 3 | EWMA projections + matchup data + manual line entry + `/custom-lines/compare` | ✅ |
-| 4 | Redis cache-aside (local only) + APScheduler 3.10.x + admin endpoints | ✅ |
-| 5 | Injury ingestion (Tank01) + AWS deployment artifacts (ECR/ECS/CI-CD) | ✅ |
+| EC2 t3.micro | 1 instance (app + postgres + redis) | ~$8 |
+| **Total** | | **~$8** |
 
 ---
 
 ## Key Design Decisions
 
-**No external odds API** — lines are entered manually. Projections come from nba_api data already in the DB. No ongoing subscription needed for the core workflow.
+**EC2 over ECS/Lambda** — APScheduler needs a persistent process. Lambda is stateless.
+ECS Fargate + RDS would cost ~$33/month vs ~$8 for t3.micro with everything containerized.
 
-**APScheduler 3.10.x (not 4.x)** — must use the `3.x` release line. APScheduler 4 has a completely different API and import paths. The `requirements.txt` pins `apscheduler>=3.10.4`. APScheduler runs inside the FastAPI process via `lifespan`; no message broker needed. The `--workers 1` constraint in production is intentional: `AsyncIOScheduler` doesn't coordinate across multiple uvicorn workers.
+**GitHub Actions as ingestion compute** — stats.nba.com blocks AWS IP ranges. GitHub
+Actions runners use residential/non-datacenter IPs that stats.nba.com allows. All nba_api
+calls run there; data is written back via SSH tunnel to EC2 postgres.
 
-**Redis local only (no ElastiCache)** — Redis runs as a sidecar container in the ECS task definition alongside the app container. This avoids the ~$15/month ElastiCache cost. The trade-off is that Redis state is lost on task restarts, which is acceptable since all cache data is reconstructed from Postgres within minutes. ElastiCache would only be worth adding if you scale to multiple tasks.
+**No external odds API** — lines are entered manually. Projections come from nba_api data
+already in the DB. No ongoing subscription needed for the core workflow.
 
-**Cache-aside, not write-through** — ingesters bust Redis keys after writing to Postgres. Redis is always populated lazily. Simpler to reason about; no risk of stale cache on partial writes.
+**APScheduler 3.10.x (not 4.x)** — must use the `3.x` release line. APScheduler 4 has a
+completely different API. The `requirements.txt` pins `apscheduler>=3.10.4`. Runs inside
+the FastAPI process via `lifespan`; `--workers 1` in production is intentional.
 
-**No FK on `players.team_id`** — avoids constraint violations during mid-season trades where a player's new team may not exist in the DB yet.
+**Redis on EC2 as a container** — avoids ElastiCache cost. Redis state lost on restart is
+acceptable since all data reconstructs from Postgres within minutes.
 
-**`prop_snapshots` kept but unused** — schema is in place for a future odds API integration without a migration. Currently empty.
+**Cache-aside, not write-through** — ingesters bust Redis keys after writing to Postgres.
+Redis is always populated lazily. Simpler to reason about; no risk of stale cache on
+partial writes.
 
-**`custom_lines` stores only the line value** — no bookmaker, no odds prices. Just player, game, market, and the number you want to track.
+**No FK on `players.team_id`** — avoids constraint violations during mid-season trades
+where a player's new team may not exist in the DB yet.
 
-**Single-page dashboard UI** — `src/static/index.html` served as a static file. Sidebar shows today's games; clicking a game loads rosters grouped by team. Clicking a player opens a detail panel with Chart.js bar charts, stat tabs (PTS/REB/AST/3PM/BLK/STL/TO), season average reference line, and a manual line input (arrow keys increment by 0.5). Mode bar switches between This Season / Last 10 H2H / Last 10 / Last 20.
+**`prop_snapshots` kept but unused** — schema is in place for a future odds API
+integration without a migration. Currently empty.
 
-**US Eastern time for all dates** — the container runs UTC but NBA game dates are ET. `src/utils/date_utils.py` provides `today_et()` using `zoneinfo.ZoneInfo("America/New_York")` for correct DST handling (EDT in summer, EST in winter). All ingesters and services use this instead of `date.today()`.
+**US Eastern time for all dates** — the container runs UTC but NBA game dates are ET.
+`src/utils/date_utils.py` provides `today_et()` using `zoneinfo.ZoneInfo("America/New_York")`
+for correct DST handling. All ingesters and services use this instead of `date.today()`.
 
-**Tomorrow's slate auto-advance** — `game_service.py` checks if all of today's games are Final; if so, it fetches and returns tomorrow's upcoming slate instead. `ingest_todays_games` pre-seeds tomorrow's schedule via `_ingest_date_schedule()` when today's games all finish.
+**Tomorrow's slate auto-advance** — `game_service.py` checks if all of today's games are
+Final; if so, fetches and returns tomorrow's upcoming slate. `ingest_todays_games`
+pre-seeds tomorrow's schedule via `_ingest_date_schedule()` when today finishes.
+
+**Historical data seeded manually** — The 2025-26 NBA season started October 22, 2025.
+Full season game schedule and box scores were seeded from Mac (non-blocked IP) via direct
+postgres connection. ~665 games and ~14,000 player game logs loaded.

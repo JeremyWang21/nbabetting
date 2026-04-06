@@ -229,8 +229,9 @@ let minMinutes = 0;
 let activePlayer = null;
 let activeStat = 'player_points';
 let chartInstance = null;
-let currentChartData = null; // { labels, values, minutes, avg }
-let activeLine = null;       // float | null
+let currentChartData = null;
+let activeLine = null;
+let cachedStats = null;  // cached season stats — only re-fetched on player change
 
 const STATS = [
   {key:'player_points',   label:'PTS'},
@@ -279,12 +280,12 @@ function setMode(btn) {
   document.querySelectorAll('.sample-pills .mpill').forEach(b=>b.classList.remove('on'));
   btn.classList.add('on');
   mode = { lb: +btn.dataset.lb, h2h: btn.dataset.h2h==='true' };
-  if (activePlayer) loadPlayerDetail(activePlayer);
+  if (activePlayer) loadPlayerDetail(activePlayer, true);
 }
 
 function onMinMinutesChange(val) {
   minMinutes = Math.max(0, parseFloat(val) || 0);
-  if (activePlayer) loadPlayerDetail(activePlayer);
+  if (activePlayer) loadPlayerDetail(activePlayer, true);
 }
 
 // ── Games sidebar ──────────────────────────────────────────────────────────
@@ -447,6 +448,7 @@ function selectPlayerFromBoxScore(id, name, teamAbbr, pos) {
   activePlayer = {id, name, teamAbbr, pos, gameId: gid, homeAbbr: teamAbbr, awayAbbr: teamAbbr, opponentTeamId: null};
   activeStat = 'player_points';
   activeLine = null;
+  cachedStats = null;
   loadPlayerDetail(activePlayer);
 }
 
@@ -459,25 +461,49 @@ function selectPlayer(id, name, teamAbbr, pos, gameId, homeAbbr, awayAbbr, oppon
   activePlayer = {id, name, teamAbbr, pos, gameId, homeAbbr, awayAbbr, opponentTeamId};
   activeStat = 'player_points';
   activeLine = null;
+  cachedStats = null;  // new player — clear stats cache
   loadPlayerDetail(activePlayer);
 }
 
 // ── Player detail ──────────────────────────────────────────────────────────
 
-async function loadPlayerDetail(p) {
+async function loadPlayerDetail(p, chartOnly=false) {
   const detail = document.getElementById('detail');
-  detail.innerHTML = '<div class="loading" style="padding:60px"><span class="spin"></span>Loading…</div>';
   const oppId = mode.h2h ? p.opponentTeamId : null;
-  try {
-    const mmParam = minMinutes > 0 ? `&min_minutes=${minMinutes}` : '';
-    const [chartData, stats] = await Promise.all([
-      api(`/players/${p.id}/chart-data?market=${activeStat}&lookback=${mode.lb}${oppId?'&opponent_team_id='+oppId:''}${mmParam}`),
-      api(`/players/${p.id}/stats`),
-    ]);
-    currentChartData = chartData;
-    renderDetail(p, chartData, stats);
-  } catch(e) {
-    detail.innerHTML = '<div class="loading">Error loading player</div>';
+  const mmParam = minMinutes > 0 ? `&min_minutes=${minMinutes}` : '';
+
+  if (!chartOnly) {
+    detail.innerHTML = '<div class="loading" style="padding:60px"><span class="spin"></span>Loading…</div>';
+    try {
+      const [chartData, stats] = await Promise.all([
+        api(`/players/${p.id}/chart-data?market=${activeStat}&lookback=${mode.lb}${oppId?'&opponent_team_id='+oppId:''}${mmParam}`),
+        api(`/players/${p.id}/stats`),
+      ]);
+      cachedStats = stats;
+      currentChartData = chartData;
+      renderDetail(p, chartData, stats);
+    } catch(e) {
+      detail.innerHTML = '<div class="loading">Error loading player</div>';
+    }
+  } else {
+    // Stat/mode switch — only refetch chart data, update in place
+    try {
+      const chartData = await api(`/players/${p.id}/chart-data?market=${activeStat}&lookback=${mode.lb}${oppId?'&opponent_team_id='+oppId:''}${mmParam}`);
+      currentChartData = chartData;
+      // Update stat tabs highlight
+      document.querySelectorAll('.stab').forEach(b => b.classList.toggle('on', b.textContent === (STATS.find(s=>s.key===activeStat)?.label||'')));
+      // Update sample pills highlight
+      document.querySelectorAll('.sample-pills .mpill').forEach(b => {
+        b.classList.toggle('on', +b.dataset.lb===mode.lb && (b.dataset.h2h==='true')===mode.h2h);
+      });
+      const n = chartData.values.length;
+      const statLabel = STATS.find(x=>x.key===activeStat)?.label||'Value';
+      const chartLabelEl = document.querySelector('.chart-label');
+      if (chartLabelEl) chartLabelEl.textContent = `${statLabel} — last ${n} game${n!==1?'s':''}`;
+      buildChart(chartData, activeLine);
+      document.getElementById('log-body').innerHTML = renderLog(chartData, statLabel);
+      if (activeLine != null) applyLineInPlace(activeLine);
+    } catch(e) { /* silent — chart just won't update */ }
   }
 }
 
@@ -830,7 +856,7 @@ function updateLogHighlight(line) {
 function switchStat(statKey) {
   activeStat = statKey;
   activeLine = null;
-  if (activePlayer) loadPlayerDetail(activePlayer);
+  if (activePlayer) loadPlayerDetail(activePlayer, true);
 }
 
 // ── Save line ──────────────────────────────────────────────────────────────

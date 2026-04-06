@@ -224,7 +224,7 @@ tbody tr.clickable:hover td{background:var(--s3)}
 <script>
 const API = '/api/v1';
 
-let mode = { lb: 82, h2h: false };
+let mode = { lb: 10, h2h: false };
 let minMinutes = 0;
 let activePlayer = null;
 let activeStat = 'player_points';
@@ -594,8 +594,16 @@ function renderDetail(p, chartData, stats) {
   document.getElementById('log-body').innerHTML = renderLog(chartData, statLabel);
 
   buildChart(chartData);
-  // restore line if switching stats then back
-  if (activeLine != null) {
+
+  // Set initial line to nearest .5 of the avg, or 0.5 if no data
+  if (activeLine == null) {
+    const avg = chartData.avg;
+    const initial = avg != null ? Math.floor(avg) + 0.5 : 0.5;
+    activeLine = initial;
+    const inp = document.getElementById('line-input');
+    if (inp) inp.value = initial;
+    applyLineInPlace(initial);
+  } else {
     const inp = document.getElementById('line-input');
     if (inp) inp.value = activeLine;
     applyLineInPlace(activeLine);
@@ -726,18 +734,18 @@ function onLineInput(raw) {
   applyLineInPlace(val);
 }
 
-// Arrow up/down = ±0.5, Shift+arrow = ±1
+// Arrow up/down = ±1, always lands on x.5
 function onLineKey(e) {
   const input = e.target;
   if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
     e.preventDefault();
-    const step = e.shiftKey ? 1 : 0.5;
-    const dir  = e.key === 'ArrowUp' ? 1 : -1;
-    const cur  = parseFloat(input.value) || 0;
-    const next = Math.max(0, Math.round((cur + dir * step) * 2) / 2);
-    input.value = next;
-    activeLine = next;
-    applyLineInPlace(next);
+    const dir = e.key === 'ArrowUp' ? 1 : -1;
+    const cur = parseFloat(input.value) || 0;
+    const next = Math.max(0.5, Math.floor(cur) + dir);
+    const final = Math.floor(next) + 0.5;
+    input.value = final;
+    activeLine = final;
+    applyLineInPlace(final);
   }
 }
 

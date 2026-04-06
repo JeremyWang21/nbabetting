@@ -52,17 +52,17 @@ jobs:
           from src.utils.date_utils import today_et
 
           async def run():
+              await ingest_roster_updates()
               await ingest_todays_games()
 
-              # If all today's games are final, sync rosters and pre-seed tomorrow
+              # If all today's games are final, pre-seed tomorrow
               today = today_et()
               async with AsyncSessionLocal() as s:
                   rows = (await s.execute(select(Game.status).where(Game.game_date == today))).all()
               statuses = [r[0].lower() for r in rows]
               finished = {'final', 'final/ot', 'final/2ot', 'final/3ot'}
               if statuses and all(st in finished for st in statuses):
-                  print('All games final — syncing rosters and pre-seeding tomorrow')
-                  await ingest_roster_updates()
+                  print('All games final — pre-seeding tomorrow')
                   try:
                       await _ingest_date_schedule(today + timedelta(days=1))
                   except Exception as e:

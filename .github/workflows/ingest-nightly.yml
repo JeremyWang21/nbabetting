@@ -47,10 +47,10 @@ jobs:
           from src.ingestion.defensive_stats_ingester import ingest_defensive_stats
 
           async def run():
+              await ingest_roster_updates()
               await ingest_game_logs()
               await ingest_season_averages()
               await ingest_defensive_stats()
-              await ingest_roster_updates()
               await ingest_todays_games()
 
           asyncio.run(run())

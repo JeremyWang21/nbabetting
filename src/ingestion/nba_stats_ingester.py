@@ -233,6 +233,41 @@ async def ingest_game_logs() -> None:
         )
         player_map: dict[int, int] = {row.nba_id: row.id for row in player_result}
 
+        # Upsert any players missing from the DB using data from the game log rows
+        # LeagueGameLog includes PLAYER_NAME, TEAM_ID, TEAM_ABBREVIATION
+        from src.models.team import Team as TeamModel
+        team_result = await session.execute(select(TeamModel.nba_id, TeamModel.id))
+        team_map: dict[int, int] = {row.nba_id: row.id for row in team_result}
+
+        missing = [r for r in rows if r["PLAYER_ID"] not in player_map]
+        for r in missing:
+            full_name = r.get("PLAYER_NAME", "")
+            parts = full_name.split(" ", 1)
+            first = parts[0] if parts else ""
+            last = parts[1] if len(parts) > 1 else ""
+            team_nba_id = r.get("TEAM_ID") or 0
+            internal_team_id = team_map.get(team_nba_id)
+            stmt = (
+                pg_insert(Player)
+                .values(
+                    nba_id=r["PLAYER_ID"],
+                    full_name=full_name,
+                    first_name=first,
+                    last_name=last,
+                    team_id=internal_team_id,
+                    is_active=True,
+                )
+                .on_conflict_do_update(
+                    index_elements=["nba_id"],
+                    set_={"full_name": full_name, "team_id": internal_team_id, "is_active": True},
+                )
+            )
+            result = await session.execute(stmt)
+            player_map[r["PLAYER_ID"]] = result.inserted_primary_key[0]
+        if missing:
+            logger.info("ingest_game_logs: auto-upserted %d missing players", len(missing))
+        await session.flush()
+
         upserted = skipped = 0
         for r in rows:
             internal_game_id = game_map.get(r["GAME_ID"])

@@ -306,7 +306,10 @@ function renderGamesList(games) {
       <div class="game-header" onclick="toggleGame(${g.id},${g.home_team_id},${g.away_team_id},'${g.home_team_abbr||'?'}','${g.away_team_abbr||'?'}')">
         <div>
           <div class="game-matchup">${g.away_team_abbr||'?'} @ ${g.home_team_abbr||'?'}</div>
-          <div class="game-status-txt">${g.status||'Scheduled'}</div>
+          ${g.away_score != null && g.home_score != null
+            ? `<div class="game-status-txt">${g.away_score} – ${g.home_score} &nbsp;·&nbsp; ${g.status||''}</div>`
+            : `<div class="game-status-txt">${g.status||'Scheduled'}</div>`
+          }
         </div>
         <span class="chevron">▼</span>
       </div>

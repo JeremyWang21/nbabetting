@@ -169,6 +169,19 @@ td{padding:7px 12px;white-space:nowrap;font-size:13px}
 /* clickable log rows */
 tbody tr.clickable{cursor:pointer}
 tbody tr.clickable:hover td{background:var(--s3)}
+/* box score table */
+.bs-wrap{overflow-x:auto}
+.bs-team-label{padding:8px 14px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;background:var(--s2);border-bottom:1px solid var(--border);border-top:1px solid var(--border)}
+.bs-wrap table td:first-child{font-weight:500;cursor:pointer;color:var(--text)}
+.bs-wrap table td:first-child:hover{color:#a5b4fc;text-decoration:underline}
+.bs-scoreboard{display:flex;align-items:center;justify-content:center;gap:18px;padding:16px 20px;background:var(--s2);border-bottom:1px solid var(--border)}
+.bs-team-name{font-size:20px;font-weight:800}
+.bs-score{font-size:38px;font-weight:900;color:var(--accent)}
+.bs-sep{font-size:22px;color:var(--muted);margin:0 6px}
+.bs-status{font-size:12px;color:var(--muted);text-align:center;padding:6px;background:var(--s2)}
+.bs-header{padding:14px 20px 8px;display:flex;justify-content:space-between;align-items:flex-start;background:var(--s1)}
+.bs-date{font-size:12px;color:var(--muted)}
+.bs-hint{font-size:11px;color:var(--muted)}
 
 /* toast */
 .toast{position:fixed;bottom:16px;right:16px;background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-size:13px;z-index:300;transition:opacity .25s}
@@ -338,6 +351,100 @@ function renderPlayerList(listEl, data, gid, homeId, awayId, homeAbbr, awayAbbr)
     ${renderTeam(away, awayAbbr, homeId)}
     <div class="team-label">${homeAbbr} — Home</div>
     ${renderTeam(home, homeAbbr, awayId)}`;
+}
+
+function renderBoxScore(detailEl, data) {
+  const g = data.game;
+  const hasScore = g.home_score != null && g.away_score != null;
+  const homeWin  = hasScore && g.home_score > g.away_score;
+  const awayWin  = hasScore && g.away_score > g.home_score;
+  const B2B = '<span style="background:#7c2d12;color:#fca5a5;font-size:10px;padding:1px 5px;border-radius:3px;font-weight:700;margin-left:5px">B2B</span>';
+
+  const scoreHTML = hasScore
+    ? `<div class="bs-team-name" style="${awayWin?'':'opacity:.45'}">${g.away_team_abbr||'?'}${g.away_b2b?B2B:''}</div>
+       <div class="bs-score" style="${awayWin?'':'opacity:.45'}">${g.away_score}</div>
+       <div class="bs-sep">–</div>
+       <div class="bs-score" style="${homeWin?'':'opacity:.45'}">${g.home_score}</div>
+       <div class="bs-team-name" style="${homeWin?'':'opacity:.45'}">${g.home_team_abbr||'?'}${g.home_b2b?B2B:''}</div>`
+    : `<div class="bs-team-name">${g.away_team_abbr||'?'}${g.away_b2b?B2B:''}</div>
+       <div style="font-size:14px;color:var(--muted);margin:0 12px">${g.status}</div>
+       <div class="bs-team-name">${g.home_team_abbr||'?'}${g.home_b2b?B2B:''}</div>`;
+
+  const cols = data.has_stats
+    ? ['MIN','PTS','REB','AST','STL','BLK','TO','FG','3PT','FT','+/-']
+    : [];
+
+  const stat = v => v != null ? v : '—';
+  const pm = v => v == null ? '—' : (v > 0 ? '+'+v : String(v));
+  const pmColor = v => v > 0 ? 'var(--green)' : v < 0 ? 'var(--red)' : 'var(--muted)';
+
+  function teamTable(players, teamAbbr) {
+    if (!data.has_stats) {
+      // just roster
+      return players.map(p =>
+        `<div class="player-row" onclick="selectPlayerFromBoxScore(${p.player_id},'${esc(p.name)}','${teamAbbr}','${p.position||''}')">
+          <span class="pname">${p.name}</span>
+          ${p.position ? `<span class="ppos">${p.position}</span>` : ''}
+        </div>`
+      ).join('');
+    }
+    const rows = players.map(p => {
+      const fg = p.fg_made != null ? `${p.fg_made}/${p.fg_attempted}` : '—';
+      const fg3 = p.fg3_made != null ? `${p.fg3_made}/${p.fg3_attempted}` : '—';
+      const ft = p.ft_made != null ? `${p.ft_made}/${p.ft_attempted}` : '—';
+      return `<tr>
+        <td onclick="selectPlayerFromBoxScore(${p.player_id},'${esc(p.name)}','${teamAbbr}','${p.position||''}')">${p.name}${p.position?`<span style="color:var(--muted);font-size:10px;margin-left:4px">${p.position}</span>`:''}</td>
+        <td class="r" style="color:var(--muted)">${stat(p.minutes)}</td>
+        <td class="r" style="font-weight:700">${stat(p.points)}</td>
+        <td class="r">${stat(p.rebounds)}</td>
+        <td class="r">${stat(p.assists)}</td>
+        <td class="r">${stat(p.steals)}</td>
+        <td class="r">${stat(p.blocks)}</td>
+        <td class="r" style="color:var(--red)">${stat(p.turnovers)}</td>
+        <td class="r" style="color:var(--muted)">${fg}</td>
+        <td class="r" style="color:var(--muted)">${fg3}</td>
+        <td class="r" style="color:var(--muted)">${ft}</td>
+        <td class="r" style="color:${pmColor(p.plus_minus)}">${pm(p.plus_minus)}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="bs-wrap"><table>
+      <thead><tr>
+        <th>Player</th>
+        <th class="r">MIN</th><th class="r">PTS</th><th class="r">REB</th><th class="r">AST</th>
+        <th class="r">STL</th><th class="r">BLK</th><th class="r">TO</th>
+        <th class="r">FG</th><th class="r">3PT</th><th class="r">FT</th><th class="r">+/-</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+  }
+
+  detailEl.innerHTML = `
+    <div class="bs-scoreboard">${scoreHTML}</div>
+    ${hasScore ? `<div class="bs-status">${g.status} &nbsp;·&nbsp; ${g.date}</div>` : `<div class="bs-status">${g.date}</div>`}
+    <div class="bs-team-label">${g.away_team_abbr} — Away</div>
+    ${teamTable(data.away_players, g.away_team_abbr)}
+    <div class="bs-team-label">${g.home_team_abbr} — Home</div>
+    ${teamTable(data.home_players, g.home_team_abbr)}
+  `;
+}
+
+function selectPlayerFromBoxScore(id, name, teamAbbr, pos) {
+  // find the active game to get gameId and opponent
+  const openGame = document.querySelector('.game-item.open');
+  if (!openGame) return;
+  const gid = parseInt(openGame.id.replace('gi-',''));
+  // find player row in sidebar and click it if available
+  const row = document.getElementById(`pr-${id}`);
+  if (row && !row.classList.contains('is-out')) {
+    row.click();
+    return;
+  }
+  // fallback: load detail directly without opponent info
+  document.querySelectorAll('.player-row').forEach(r=>r.classList.remove('active'));
+  activePlayer = {id, name, teamAbbr, pos, gameId: gid, homeAbbr: teamAbbr, awayAbbr: teamAbbr, opponentTeamId: null};
+  activeStat = 'player_points';
+  activeLine = null;
+  loadPlayerDetail(activePlayer);
 }
 
 // ── Player select ──────────────────────────────────────────────────────────
@@ -746,7 +853,6 @@ async function saveLine() {
 
 async function openGameDetail(gameId) {
   if (!activePlayer) return;
-  // show overlay with spinner
   let overlay = document.getElementById('gd-overlay');
   if (!overlay) {
     overlay = document.createElement('div');
@@ -759,7 +865,7 @@ async function openGameDetail(gameId) {
   overlay.style.display = 'flex';
 
   try {
-    const data = await api(`/games/${gameId}/boxscore/${activePlayer.id}`);
+    const data = await api(`/games/${gameId}/full-boxscore`);
     renderGameDetail(overlay, data);
   } catch(e) {
     overlay.querySelector('.gd-modal').innerHTML = `
@@ -777,9 +883,6 @@ const B2B_TAG = '<span style="background:#7c2d12;color:#fca5a5;font-size:10px;pa
 
 function renderGameDetail(overlay, data) {
   const g = data.game;
-  const b = data.boxscore;
-  const p = data.player;
-
   const hasScore = g.home_score != null && g.away_score != null;
   const homeWin  = hasScore && g.home_score > g.away_score;
   const awayWin  = hasScore && g.away_score > g.home_score;
@@ -790,37 +893,23 @@ function renderGameDetail(overlay, data) {
        <div class="gd-score" style="${homeWin?'':'opacity:.45'}">${g.home_score}</div>`
     : `<div class="gd-score" style="color:var(--muted);font-size:20px">${g.status}</div>`;
 
-  const stat = (val, na='—') => val != null ? val : na;
-  const pct  = (val) => val != null ? val+'%' : '—';
-  const pm   = (val) => val == null ? '—' : (val > 0 ? '+'+val : String(val));
-  const pmColor = b?.plus_minus > 0 ? 'var(--green)' : b?.plus_minus < 0 ? 'var(--red)' : 'var(--muted)';
+  const parseMins = m => m ? parseFloat(m) : 0;
 
-  const pra = b ? (b.points??0)+(b.rebounds??0)+(b.assists??0) : null;
-  const pa  = b ? (b.points??0)+(b.assists??0) : null;
-  const ra  = b ? (b.rebounds??0)+(b.assists??0) : null;
-
-  const boxHTML = b ? `
-    <div class="gd-player-title">${p.name}</div>
-    <div class="gd-stats-grid">
-      <div class="gd-stat"><div class="val">${stat(b.points)}</div><div class="lbl">PTS</div></div>
-      <div class="gd-stat"><div class="val">${stat(b.rebounds)}</div><div class="lbl">REB</div></div>
-      <div class="gd-stat"><div class="val">${stat(b.assists)}</div><div class="lbl">AST</div></div>
-      <div class="gd-stat"><div class="val">${stat(b.minutes)}</div><div class="lbl">MIN</div></div>
-      <div class="gd-stat"><div class="val">${stat(b.steals)}</div><div class="lbl">STL</div></div>
-      <div class="gd-stat"><div class="val">${stat(b.blocks)}</div><div class="lbl">BLK</div></div>
-      <div class="gd-stat"><div class="val">${stat(b.turnovers)}</div><div class="lbl">TO</div></div>
-      <div class="gd-stat"><div class="val" style="color:${pmColor}">${pm(b.plus_minus)}</div><div class="lbl">+/−</div></div>
-    </div>
-    <div class="gd-shooting" style="grid-template-columns:repeat(3,1fr);margin-bottom:8px">
-      <div class="gd-stat"><div class="val">${pra}</div><div class="lbl">PRA</div></div>
-      <div class="gd-stat"><div class="val">${pa}</div><div class="lbl">P+A</div></div>
-      <div class="gd-stat"><div class="val">${ra}</div><div class="lbl">R+A</div></div>
-    </div>
-    <div class="gd-shooting">
-      <div class="gd-stat"><div class="val">${stat(b.fg_made)}/${stat(b.fg_attempted)}</div><div class="lbl">FG · ${pct(b.fg_pct)}</div></div>
-      <div class="gd-stat"><div class="val">${stat(b.fg3_made)}/${stat(b.fg3_attempted)}</div><div class="lbl">3PT · ${pct(b.fg3_pct)}</div></div>
-      <div class="gd-stat"><div class="val">${stat(b.ft_made)}/${stat(b.ft_attempted)}</div><div class="lbl">FT · ${pct(b.ft_pct)}</div></div>
-    </div>` : `<div style="color:var(--muted);font-size:13px;padding:10px 0">No box score data for this game.</div>`;
+  function lineupList(players, teamAbbr) {
+    const sorted = [...players].sort((a,b) => parseMins(b.minutes) - parseMins(a.minutes));
+    if (!sorted.length) return '<div style="color:var(--muted);font-size:12px;padding:8px 0">No lineup data</div>';
+    return sorted.map((p, i) => {
+      const mins = p.minutes != null ? p.minutes+'m' : '—';
+      const isActive = activePlayer && p.player_id === activePlayer.id;
+      return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer;${isActive?'background:var(--adim);margin:0 -4px;padding:6px 4px;border-radius:6px':''}"
+        onclick="jumpToPlayer(${p.player_id},'${esc(p.name)}','${teamAbbr}','${p.position||''}')">
+        <span style="font-size:10px;color:var(--muted);width:14px;text-align:right">${i+1}</span>
+        ${p.position ? `<span style="font-size:10px;color:var(--muted);width:20px">${p.position}</span>` : '<span style="width:20px"></span>'}
+        <span style="flex:1;font-size:13px;font-weight:${isActive?700:400};color:${isActive?'#a5b4fc':'var(--text)'}">${p.name}</span>
+        <span style="font-size:12px;color:var(--muted);font-weight:600">${mins}</span>
+      </div>`;
+    }).join('');
+  }
 
   overlay.querySelector('.gd-modal').innerHTML = `
     <button class="gd-back" onclick="closeGameDetail()">← Back to player</button>
@@ -839,7 +928,20 @@ function renderGameDetail(overlay, data) {
       </div>
     </div>
     ${hasScore ? `<div class="gd-status">${g.status}</div>` : ''}
-    <div style="margin-top:18px">${boxHTML}</div>`;
+    <div style="margin-top:18px">
+      <div class="gd-player-title">${g.away_team_abbr} — Away</div>
+      ${lineupList(data.away_players, g.away_team_abbr)}
+      <div class="gd-player-title" style="margin-top:16px">${g.home_team_abbr} — Home</div>
+      ${lineupList(data.home_players, g.home_team_abbr)}
+    </div>`;
+}
+
+function jumpToPlayer(id, name, teamAbbr, pos) {
+  closeGameDetail();
+  const row = document.getElementById(`pr-${id}`);
+  if (row && !row.classList.contains('is-out')) {
+    row.click();
+  }
 }
 
 </script>

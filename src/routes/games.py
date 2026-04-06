@@ -78,6 +78,124 @@ async def get_game_players(game_id: int, db: AsyncSession = Depends(get_db)):
     }
 
 
+@router.get("/{game_id}/full-boxscore")
+async def get_full_boxscore(game_id: int, db: AsyncSession = Depends(get_db)):
+    """Return full box score for both teams in a game."""
+    from datetime import timedelta
+    from src.models.game_log import PlayerGameLog
+    from fastapi import HTTPException
+
+    game = await db.get(Game, game_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    team_ids = [game.home_team_id, game.away_team_id]
+    t_result = await db.execute(
+        select(Team.id, Team.abbreviation, Team.name).where(Team.id.in_(team_ids))
+    )
+    teams = {row.id: row for row in t_result}
+
+    # All game logs for this game
+    log_result = await db.execute(
+        select(PlayerGameLog, Player.full_name, Player.position, Player.team_id)
+        .join(Player, PlayerGameLog.player_id == Player.id)
+        .where(PlayerGameLog.game_id == game_id)
+        .order_by(PlayerGameLog.points.desc().nullslast())
+    )
+    log_rows = log_result.all()
+
+    # Active roster for teams (for scheduled games with no logs)
+    p_result = await db.execute(
+        select(Player).where(
+            Player.team_id.in_(team_ids),
+            Player.is_active.is_(True),
+        ).order_by(Player.full_name)
+    )
+    all_players = p_result.scalars().all()
+
+    # B2B check
+    yesterday = game.game_date - timedelta(days=1)
+    b2b_result = await db.execute(
+        select(Game.home_team_id, Game.away_team_id).where(Game.game_date == yesterday)
+    )
+    yesterday_teams: set[int] = set()
+    for row in b2b_result:
+        yesterday_teams.add(row.home_team_id)
+        yesterday_teams.add(row.away_team_id)
+
+    def pct(made, att):
+        if made is None or att is None or att == 0:
+            return None
+        return round(made / att * 100, 1)
+
+    def build_player_row(log, name, pos, team_id, player_id):
+        return {
+            "player_id": player_id,
+            "name": name,
+            "position": pos,
+            "team_id": team_id,
+            "minutes": log.minutes if log else None,
+            "points": log.points if log else None,
+            "rebounds": log.rebounds if log else None,
+            "assists": log.assists if log else None,
+            "steals": log.steals if log else None,
+            "blocks": log.blocks if log else None,
+            "turnovers": log.turnovers if log else None,
+            "fg_made": log.fg_made if log else None,
+            "fg_attempted": log.fg_attempted if log else None,
+            "fg_pct": pct(log.fg_made, log.fg_attempted) if log else None,
+            "fg3_made": log.fg3_made if log else None,
+            "fg3_attempted": log.fg3_attempted if log else None,
+            "fg3_pct": pct(log.fg3_made, log.fg3_attempted) if log else None,
+            "ft_made": log.ft_made if log else None,
+            "ft_attempted": log.ft_attempted if log else None,
+            "ft_pct": pct(log.ft_made, log.ft_attempted) if log else None,
+            "plus_minus": log.plus_minus if log else None,
+        }
+
+    has_logs = len(log_rows) > 0
+
+    if has_logs:
+        home_rows, away_rows = [], []
+        for row in log_rows:
+            log, name, pos, team_id = row[0], row[1], row[2], row[3]
+            entry = build_player_row(log, name, pos, team_id, log.player_id)
+            if team_id == game.home_team_id:
+                home_rows.append(entry)
+            else:
+                away_rows.append(entry)
+    else:
+        # No logs yet — return roster only
+        home_rows = [build_player_row(None, p.full_name, p.position, p.team_id, p.id)
+                     for p in all_players if p.team_id == game.home_team_id]
+        away_rows = [build_player_row(None, p.full_name, p.position, p.team_id, p.id)
+                     for p in all_players if p.team_id == game.away_team_id]
+
+    home = teams.get(game.home_team_id)
+    away = teams.get(game.away_team_id)
+
+    return {
+        "game": {
+            "id": game.id,
+            "date": game.game_date.strftime("%a %b %-d, %Y"),
+            "status": game.status,
+            "home_team_id": game.home_team_id,
+            "away_team_id": game.away_team_id,
+            "home_team_abbr": home.abbreviation if home else None,
+            "home_team_name": home.name if home else None,
+            "away_team_abbr": away.abbreviation if away else None,
+            "away_team_name": away.name if away else None,
+            "home_score": game.home_score,
+            "away_score": game.away_score,
+            "home_b2b": game.home_team_id in yesterday_teams,
+            "away_b2b": game.away_team_id in yesterday_teams,
+        },
+        "has_stats": has_logs,
+        "home_players": home_rows,
+        "away_players": away_rows,
+    }
+
+
 @router.get("/{game_id}/boxscore/{player_id}")
 async def get_player_boxscore(game_id: int, player_id: int, db: AsyncSession = Depends(get_db)):
     """Return game summary + full box score line for one player."""

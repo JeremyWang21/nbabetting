@@ -919,9 +919,38 @@ function renderGameDetail(overlay, data) {
 
   const statusLine = hasScore ? `${g.status} · ${g.date}` : g.date;
 
+  // Find active player's stats in the lineup data
+  const allPlayers = [...data.away_players, ...data.home_players];
+  const ap = activePlayer ? allPlayers.find(p => p.player_id === activePlayer.id) : null;
+  const pct = (m, a) => m != null && a ? (m/a*100).toFixed(1)+'%' : '—';
+  const pm = v => v == null ? '—' : (v > 0 ? '+'+v : String(v));
+  const pmColor = ap?.plus_minus > 0 ? 'var(--green)' : ap?.plus_minus < 0 ? 'var(--red)' : 'var(--muted)';
+  const stat = v => v != null ? v : '—';
+
+  const playerStatsHTML = ap && ap.points != null ? `
+    <div style="background:var(--s2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:#a5b4fc;margin-bottom:10px">${activePlayer.name}</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
+        <div style="text-align:center"><div style="font-size:20px;font-weight:800">${stat(ap.points)}</div><div style="font-size:10px;color:var(--muted)">PTS</div></div>
+        <div style="text-align:center"><div style="font-size:20px;font-weight:800">${stat(ap.rebounds)}</div><div style="font-size:10px;color:var(--muted)">REB</div></div>
+        <div style="text-align:center"><div style="font-size:20px;font-weight:800">${stat(ap.assists)}</div><div style="font-size:10px;color:var(--muted)">AST</div></div>
+        <div style="text-align:center"><div style="font-size:20px;font-weight:800">${stat(ap.minutes)}m</div><div style="font-size:10px;color:var(--muted)">MIN</div></div>
+        <div style="text-align:center"><div style="font-size:16px;font-weight:700">${stat(ap.steals)}</div><div style="font-size:10px;color:var(--muted)">STL</div></div>
+        <div style="text-align:center"><div style="font-size:16px;font-weight:700">${stat(ap.blocks)}</div><div style="font-size:10px;color:var(--muted)">BLK</div></div>
+        <div style="text-align:center"><div style="font-size:16px;font-weight:700">${stat(ap.turnovers)}</div><div style="font-size:10px;color:var(--muted)">TO</div></div>
+        <div style="text-align:center"><div style="font-size:16px;font-weight:700;color:${pmColor}">${pm(ap.plus_minus)}</div><div style="font-size:10px;color:var(--muted)">+/-</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:12px;color:var(--muted);text-align:center">
+        <div>${stat(ap.fg_made)}/${stat(ap.fg_attempted)} FG (${pct(ap.fg_made,ap.fg_attempted)})</div>
+        <div>${stat(ap.fg3_made)}/${stat(ap.fg3_attempted)} 3PT (${pct(ap.fg3_made,ap.fg3_attempted)})</div>
+        <div>${stat(ap.ft_made)}/${stat(ap.ft_attempted)} FT (${pct(ap.ft_made,ap.ft_attempted)})</div>
+      </div>
+    </div>` : '';
+
   overlay.querySelector('.gd-modal').innerHTML = `
     <button class="gd-back" onclick="closeGameDetail()">← Back to player</button>
     <div style="font-size:11px;color:var(--muted);margin-bottom:12px">${statusLine}</div>
+    ${playerStatsHTML}
     <div style="display:flex;gap:16px;align-items:flex-start">
       ${teamColumn(data.away_players, g.away_team_abbr||'?', g.away_score, awayWin, g.away_b2b)}
       <div style="width:1px;background:var(--border);align-self:stretch;flex-shrink:0"></div>

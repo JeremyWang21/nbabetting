@@ -113,6 +113,20 @@ async def get_full_boxscore(game_id: int, db: AsyncSession = Depends(get_db)):
     )
     all_players = p_result.scalars().all()
 
+    # Derive scores from game logs when not stored
+    home_score = game.home_score
+    away_score = game.away_score
+    if (home_score is None or away_score is None) and log_rows:
+        score_by_team: dict[int, int] = {}
+        for row in log_rows:
+            log, _, _, team_id = row[0], row[1], row[2], row[3]
+            if log.points is not None:
+                score_by_team[team_id] = score_by_team.get(team_id, 0) + log.points
+        if game.home_team_id in score_by_team:
+            home_score = score_by_team[game.home_team_id]
+        if game.away_team_id in score_by_team:
+            away_score = score_by_team[game.away_team_id]
+
     # B2B check
     yesterday = game.game_date - timedelta(days=1)
     b2b_result = await db.execute(
@@ -185,8 +199,8 @@ async def get_full_boxscore(game_id: int, db: AsyncSession = Depends(get_db)):
             "home_team_name": home.name if home else None,
             "away_team_abbr": away.abbreviation if away else None,
             "away_team_name": away.name if away else None,
-            "home_score": game.home_score,
-            "away_score": game.away_score,
+            "home_score": home_score,
+            "away_score": away_score,
             "home_b2b": game.home_team_id in yesterday_teams,
             "away_b2b": game.away_team_id in yesterday_teams,
         },

@@ -42,11 +42,12 @@ jobs:
         run: |
           python -c "
           import asyncio
-          from src.ingestion.nba_stats_ingester import ingest_game_logs, ingest_season_averages, ingest_todays_games
+          from src.ingestion.nba_stats_ingester import ingest_game_logs, ingest_season_averages, ingest_todays_games, repair_game_dates
           from src.ingestion.roster_ingester import ingest_roster_updates
           from src.ingestion.defensive_stats_ingester import ingest_defensive_stats
 
           async def run():
+              await repair_game_dates()
               await ingest_roster_updates()
               await ingest_game_logs()
               await ingest_season_averages()
@@ -56,8 +57,9 @@ jobs:
           asyncio.run(run())
           "
 
-      - name: Flush Redis cache on EC2
+      - name: Flush all Redis cache on EC2
         run: |
           curl -s -X DELETE \
             -H "x-admin-secret: ${{ secrets.ADMIN_SECRET }}" \
             "https://jprops.xyz/api/v1/admin/cache?pattern=*"
+          echo "Cache flushed"

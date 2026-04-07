@@ -85,8 +85,14 @@ async def get_game_players(game_id: int, db: AsyncSession = Depends(get_db)):
 
     result = []
     for p in players:
-        # Use game-log-derived team if current team_id is stale
-        effective_team_id = p.team_id if p.team_id in team_ids else player_game_team.get(p.id, p.team_id)
+        # Determine which team this player is on for this game
+        if p.team_id in team_ids:
+            effective_team_id = p.team_id
+        elif p.id in player_game_team:
+            effective_team_id = player_game_team[p.id]
+        else:
+            # Can't place this player on either team — skip them
+            continue
         is_out = p.id in out_players
         result.append({
             "id": p.id,

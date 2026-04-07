@@ -56,27 +56,25 @@ async def repair_game_dates() -> None:
     Simple heuristic: move any scheduled/non-final game stored before today
     that also exists in tomorrow's or next 3 days' actual schedule.
     """
-    from sqlalchemy import update as sa_update, and_
+    from sqlalchemy import update as sa_update
 
     today = today_et()
     async with AsyncSessionLocal() as session:
-        # Find games stored on past dates that are not final
+        # Find games stored on today or past dates that are not final
+        # (games can get clobbered to today even when they belong to tomorrow)
         finished = ["final", "final/ot", "final/2ot", "final/3ot"]
         result = await session.execute(
             select(Game).where(
-                Game.game_date < today,
+                Game.game_date <= today,
                 Game.status.not_in(finished),
             )
         )
-        bad_games = result.scalars().all()
-        if not bad_games:
-            logger.info("repair_game_dates: no bad rows found")
-            return
-        logger.warning("repair_game_dates: found %d games with bad dates", len(bad_games))
+        candidate_games = result.scalars().all()
 
-        # Pull real schedule for next 3 days and match by nba_game_id
+        # Pull real schedule for next 3 days to find any misplaced games
         from nba_api.stats.endpoints import ScoreboardV2
         fixed = 0
+        future_game_ids: dict[str, date] = {}
         for offset in range(1, 4):
             target = today + timedelta(days=offset)
             date_str = target.strftime("%m/%d/%Y")
@@ -86,21 +84,25 @@ async def repair_game_dates() -> None:
                     None, partial(ScoreboardV2, game_date=date_str, league_id="00")
                 )
                 headers = endpoint.get_normalized_dict().get("GameHeader", [])
-                real_dates = {h["GAME_ID"]: target for h in headers}
-                for game in bad_games:
-                    if game.nba_game_id in real_dates:
-                        correct_date = real_dates[game.nba_game_id]
-                        await session.execute(
-                            sa_update(Game)
-                            .where(Game.id == game.id)
-                            .values(game_date=correct_date)
-                        )
-                        logger.info(
-                            "repair_game_dates: fixed %s → %s", game.nba_game_id, correct_date
-                        )
-                        fixed += 1
+                for h in headers:
+                    future_game_ids[h["GAME_ID"]] = target
             except Exception as exc:
                 logger.warning("repair_game_dates: ScoreboardV2 failed for %s (%s)", target, exc)
+
+        # Any non-final game stored on today-or-earlier that appears in a future schedule is wrong
+        bad_games = [g for g in candidate_games if g.nba_game_id in future_game_ids]
+        if not bad_games:
+            logger.info("repair_game_dates: no bad rows found")
+            return
+        logger.warning("repair_game_dates: found %d games with bad dates", len(bad_games))
+
+        for game in bad_games:
+            correct_date = future_game_ids[game.nba_game_id]
+            await session.execute(
+                sa_update(Game).where(Game.id == game.id).values(game_date=correct_date)
+            )
+            logger.info("repair_game_dates: fixed %s → %s", game.nba_game_id, correct_date)
+            fixed += 1
 
         await session.commit()
         logger.info("repair_game_dates: fixed %d games", fixed)

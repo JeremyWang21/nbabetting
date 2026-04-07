@@ -21,21 +21,14 @@ async def get_todays_games(db: AsyncSession = Depends(get_db)):
 @router.get("/{game_id}/players")
 async def get_game_players(game_id: int, db: AsyncSession = Depends(get_db)):
     """Return active players for both teams in a game, with injury status."""
+    from src.models.game_log import PlayerGameLog
+    from fastapi import HTTPException
+
     game = await db.get(Game, game_id)
     if game is None:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Game not found")
 
     team_ids = [game.home_team_id, game.away_team_id]
-
-    # load players for both teams
-    p_result = await db.execute(
-        select(Player).where(
-            Player.team_id.in_(team_ids),
-            Player.is_active.is_(True),
-        ).order_by(Player.full_name)
-    )
-    players = p_result.scalars().all()
 
     # load team abbreviations
     t_result = await db.execute(
@@ -43,7 +36,45 @@ async def get_game_players(game_id: int, db: AsyncSession = Depends(get_db)):
     )
     team_abbr = {row.id: row.abbreviation for row in t_result}
 
-    # load latest injury status per player (OUT only — exclude from "playing")
+    # Primary source: players by current team_id
+    p_result = await db.execute(
+        select(Player).where(
+            Player.team_id.in_(team_ids),
+            Player.is_active.is_(True),
+        )
+    )
+    players_by_team = {p.id: p for p in p_result.scalars().all()}
+
+    # Fallback: any player who has a game log for this game (catches stale team_id)
+    log_result = await db.execute(
+        select(PlayerGameLog.player_id).where(PlayerGameLog.game_id == game_id)
+    )
+    logged_player_ids = [r[0] for r in log_result.all()]
+    if logged_player_ids:
+        extra_result = await db.execute(
+            select(Player).where(Player.id.in_(logged_player_ids))
+        )
+        for p in extra_result.scalars().all():
+            if p.id not in players_by_team:
+                players_by_team[p.id] = p
+
+    players = sorted(players_by_team.values(), key=lambda p: p.full_name)
+
+    # For players whose team_id doesn't match either team, assign by game log
+    log_team_result = await db.execute(
+        select(PlayerGameLog.player_id, Player.team_id)
+        .join(Player, PlayerGameLog.player_id == Player.id)
+        .where(PlayerGameLog.game_id == game_id)
+    )
+    # Build a map: player_id → which team they played for in this specific game
+    # We infer from their current team_id if it matches, else assign to closest team via log
+    player_game_team: dict[int, int] = {}
+    for row in log_team_result.all():
+        pid, tid = row[0], row[1]
+        if tid in team_ids:
+            player_game_team[pid] = tid
+
+    # load injury status
     player_ids = [p.id for p in players]
     inj_result = await db.execute(
         select(InjuryReport.player_id, InjuryReport.status, InjuryReport.injury_description)
@@ -54,14 +85,16 @@ async def get_game_players(game_id: int, db: AsyncSession = Depends(get_db)):
 
     result = []
     for p in players:
+        # Use game-log-derived team if current team_id is stale
+        effective_team_id = p.team_id if p.team_id in team_ids else player_game_team.get(p.id, p.team_id)
         is_out = p.id in out_players
         result.append({
             "id": p.id,
             "full_name": p.full_name,
             "position": p.position,
             "jersey_number": p.jersey_number,
-            "team_id": p.team_id,
-            "team_abbr": team_abbr.get(p.team_id),
+            "team_id": effective_team_id,
+            "team_abbr": team_abbr.get(effective_team_id),
             "status": "OUT" if is_out else "ACTIVE",
             "injury_note": out_players.get(p.id),
         })

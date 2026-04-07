@@ -102,7 +102,6 @@ async def ingest_todays_games() -> None:
                 .on_conflict_do_update(
                     index_elements=["nba_game_id"],
                     set_={
-                        "game_date": today_et(),
                         "status": g.get("gameStatusText", "scheduled"),
                         "home_score": home_score,
                         "away_score": away_score,

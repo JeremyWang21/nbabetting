@@ -60,6 +60,7 @@ async def get_player_chart_data(
     lookback: int = Query(15, ge=3, le=82),
     opponent_team_id: int | None = Query(None),
     min_minutes: float = Query(0, ge=0, le=60),
+    game_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """Return per-game values + dates for charting, plus season average for reference line."""
@@ -125,16 +126,30 @@ async def get_player_chart_data(
 
     avg = round(sum(values) / len(values), 1) if values else None
 
-    # B2B: check if player's team played yesterday regardless of lookback/filter
-    yesterday = today_et() - timedelta(days=1)
+    # B2B: did the player's team play the day before their upcoming game?
+    # Must use game_id to get the correct game date — otherwise when showing tomorrow's
+    # games, today_et()-1 gives the wrong reference date.
     b2b = False
-    if player and player.team_id:
-        b2b_result = await db.execute(
-            select(Game.id).where(
-                Game.game_date == yesterday,
-                (Game.home_team_id == player.team_id) | (Game.away_team_id == player.team_id),
-            ).limit(1)
-        )
-        b2b = b2b_result.scalar_one_or_none() is not None
+    if game_id and player:
+        tonight = await db.get(Game, game_id)
+        if tonight:
+            # Determine which team the player is on for this game
+            if tonight.home_team_id == player.team_id:
+                team_id_for_b2b = player.team_id
+            elif tonight.away_team_id == player.team_id:
+                team_id_for_b2b = player.team_id
+            else:
+                # stale team_id — can't determine reliably, skip B2B
+                team_id_for_b2b = None
+
+            if team_id_for_b2b:
+                day_before = tonight.game_date - timedelta(days=1)
+                b2b_result = await db.execute(
+                    select(Game.id).where(
+                        Game.game_date == day_before,
+                        (Game.home_team_id == team_id_for_b2b) | (Game.away_team_id == team_id_for_b2b),
+                    ).limit(1)
+                )
+                b2b = b2b_result.scalar_one_or_none() is not None
 
     return {"labels": labels, "values": values, "minutes": minutes_list, "game_ids": game_ids, "avg": avg, "field": field, "market": market, "b2b": b2b}

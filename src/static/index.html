@@ -475,8 +475,9 @@ async function loadPlayerDetail(p, chartOnly=false) {
   if (!chartOnly) {
     detail.innerHTML = '<div class="loading" style="padding:60px"><span class="spin"></span>Loading…</div>';
     try {
+      const gameParam = p.gameId ? `&game_id=${p.gameId}` : '';
       const [chartData, stats] = await Promise.all([
-        api(`/players/${p.id}/chart-data?market=${activeStat}&lookback=${mode.lb}${oppId?'&opponent_team_id='+oppId:''}${mmParam}`),
+        api(`/players/${p.id}/chart-data?market=${activeStat}&lookback=${mode.lb}${oppId?'&opponent_team_id='+oppId:''}${mmParam}${gameParam}`),
         api(`/players/${p.id}/stats`),
       ]);
       cachedStats = stats;
@@ -488,7 +489,8 @@ async function loadPlayerDetail(p, chartOnly=false) {
   } else {
     // Stat/mode switch — only refetch chart data, update in place
     try {
-      const chartData = await api(`/players/${p.id}/chart-data?market=${activeStat}&lookback=${mode.lb}${oppId?'&opponent_team_id='+oppId:''}${mmParam}`);
+      const gameParam = p.gameId ? `&game_id=${p.gameId}` : '';
+      const chartData = await api(`/players/${p.id}/chart-data?market=${activeStat}&lookback=${mode.lb}${oppId?'&opponent_team_id='+oppId:''}${mmParam}${gameParam}`);
       currentChartData = chartData;
       // Update stat tabs highlight
       document.querySelectorAll('.stab').forEach(b => b.classList.toggle('on', b.textContent === (STATS.find(s=>s.key===activeStat)?.label||'')));

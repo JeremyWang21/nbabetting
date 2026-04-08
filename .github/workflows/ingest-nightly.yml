@@ -33,7 +33,7 @@ jobs:
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/ec2.pem \
             -L 5432:localhost:5432 \
             ec2-user@${{ secrets.EC2_HOST }} -N &
-          sleep 5
+          sleep 10
 
       - name: Run nightly ingestion
         env:
@@ -41,18 +41,26 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
         run: |
           python -c "
-          import asyncio
+          import asyncio, traceback
           from src.ingestion.nba_stats_ingester import ingest_game_logs, ingest_season_averages, ingest_todays_games, repair_game_dates
           from src.ingestion.roster_ingester import ingest_roster_updates
           from src.ingestion.defensive_stats_ingester import ingest_defensive_stats
 
+          async def safe(name, coro):
+              try:
+                  await coro
+                  print(f'[OK] {name}')
+              except Exception:
+                  print(f'[FAIL] {name}')
+                  traceback.print_exc()
+
           async def run():
-              await repair_game_dates()
-              await ingest_roster_updates()
-              await ingest_game_logs()
-              await ingest_season_averages()
-              await ingest_defensive_stats()
-              await ingest_todays_games()
+              await safe('repair_game_dates', repair_game_dates())
+              await safe('ingest_roster_updates', ingest_roster_updates())
+              await safe('ingest_game_logs', ingest_game_logs())
+              await safe('ingest_season_averages', ingest_season_averages())
+              await safe('ingest_defensive_stats', ingest_defensive_stats())
+              await safe('ingest_todays_games', ingest_todays_games())
 
           asyncio.run(run())
           "

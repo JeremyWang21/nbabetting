@@ -34,7 +34,7 @@ jobs:
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/ec2.pem \
             -L 5432:localhost:5432 \
             ec2-user@${{ secrets.EC2_HOST }} -N &
-          sleep 5
+          sleep 10
 
       - name: Run game ingestion
         env:

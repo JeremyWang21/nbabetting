@@ -237,7 +237,7 @@ async def _ingest_date_schedule(target_date: date) -> None:
                 )
                 .on_conflict_do_update(
                     index_elements=["nba_game_id"],
-                    set_={"game_date": target_date, "status": g.get("GAME_STATUS_TEXT", "Scheduled")},
+                    set_={"status": g.get("GAME_STATUS_TEXT", "Scheduled")},
                 )
             )
             await session.execute(stmt)

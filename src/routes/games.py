@@ -166,10 +166,17 @@ async def get_full_boxscore(game_id: int, db: AsyncSession = Depends(get_db)):
         if game.away_team_id in score_by_team:
             away_score = score_by_team[game.away_team_id]
 
-    # B2B check
+    # B2B check: did each team play in a DIFFERENT Final game on the same date
+    # or the day before? This handles cases where late-night games and early
+    # games share the same calendar date in the DB.
     yesterday = game.game_date - timedelta(days=1)
+    finished_statuses = ["Final", "Final/OT", "Final/2OT", "Final/3OT"]
     b2b_result = await db.execute(
-        select(Game.home_team_id, Game.away_team_id).where(Game.game_date == yesterday)
+        select(Game.home_team_id, Game.away_team_id).where(
+            Game.game_date.in_([yesterday, game.game_date]),
+            Game.id != game.id,
+            Game.status.in_(finished_statuses),
+        )
     )
     yesterday_teams: set[int] = set()
     for row in b2b_result:
@@ -297,11 +304,16 @@ async def get_player_boxscore(game_id: int, player_id: int, db: AsyncSession = D
         home_score = score_map.get(game.home_team_id) or home_score
         away_score = score_map.get(game.away_team_id) or away_score
 
-    # B2B: check if each team played the day before this game
+    # B2B: check if each team played in a different Final game same day or day before
     yesterday = game.game_date - timedelta(days=1)
+    finished_statuses = ["Final", "Final/OT", "Final/2OT", "Final/3OT"]
     b2b_result = await db.execute(
         select(Game.home_team_id, Game.away_team_id)
-        .where(Game.game_date == yesterday)
+        .where(
+            Game.game_date.in_([yesterday, game.game_date]),
+            Game.id != game.id,
+            Game.status.in_(finished_statuses),
+        )
     )
     yesterday_teams: set[int] = set()
     for row in b2b_result:

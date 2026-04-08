@@ -126,13 +126,14 @@ async def get_player_chart_data(
 
     avg = round(sum(values) / len(values), 1) if values else None
 
-    # B2B: did this specific player actually play the day before?
-    # Team played yesterday AND player had >0 minutes in that game.
+    # B2B: did this specific player actually play in a recent Final game?
+    # Checks same date (different game) + day before, and verifies the player
+    # had >0 minutes. Handles cases where late games share a calendar date
+    # with earlier Final games.
     b2b = False
     if game_id and player:
         tonight = await db.get(Game, game_id)
         if tonight:
-            # Determine which team the player is on for this game
             if tonight.home_team_id == player.team_id:
                 team_id_for_b2b = player.team_id
             elif tonight.away_team_id == player.team_id:
@@ -142,19 +143,22 @@ async def get_player_chart_data(
 
             if team_id_for_b2b:
                 day_before = tonight.game_date - timedelta(days=1)
-                # Find yesterday's game for this team
-                yesterday_game = await db.execute(
+                finished_statuses = ["Final", "Final/OT", "Final/2OT", "Final/3OT"]
+                # Find a Final game for this team on same day or day before
+                prev_game = await db.execute(
                     select(Game.id).where(
-                        Game.game_date == day_before,
+                        Game.game_date.in_([day_before, tonight.game_date]),
+                        Game.id != game_id,
+                        Game.status.in_(finished_statuses),
                         (Game.home_team_id == team_id_for_b2b) | (Game.away_team_id == team_id_for_b2b),
                     ).limit(1)
                 )
-                yesterday_gid = yesterday_game.scalar_one_or_none()
-                if yesterday_gid:
+                prev_gid = prev_game.scalar_one_or_none()
+                if prev_gid:
                     # Check if the player actually played (had >0 minutes)
                     played = await db.execute(
                         select(PlayerGameLog.id).where(
-                            PlayerGameLog.game_id == yesterday_gid,
+                            PlayerGameLog.game_id == prev_gid,
                             PlayerGameLog.player_id == player_id,
                             PlayerGameLog.minutes > 0,
                         ).limit(1)

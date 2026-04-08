@@ -126,10 +126,10 @@ async def get_player_chart_data(
 
     avg = round(sum(values) / len(values), 1) if values else None
 
-    # B2B: did this specific player actually play in a recent Final game?
-    # Checks same date (different game) + day before, and verifies the player
-    # had >0 minutes. Handles cases where late games share a calendar date
-    # with earlier Final games.
+    # B2B: did this player play in a Final game earlier today or yesterday?
+    # Prefer same-day Finals (handles late games sharing a calendar date with
+    # earlier Final games). Falls back to yesterday if no same-day Finals.
+    # Also verifies the player had >0 minutes in that prior game.
     b2b = False
     if game_id and player:
         tonight = await db.get(Game, game_id)
@@ -142,20 +142,28 @@ async def get_player_chart_data(
                 team_id_for_b2b = None
 
             if team_id_for_b2b:
-                day_before = tonight.game_date - timedelta(days=1)
                 finished_statuses = ["Final", "Final/OT", "Final/2OT", "Final/3OT"]
-                # Find a Final game for this team on same day or day before
+                # Check same-day Final first
                 prev_game = await db.execute(
                     select(Game.id).where(
-                        Game.game_date.in_([day_before, tonight.game_date]),
+                        Game.game_date == tonight.game_date,
                         Game.id != game_id,
                         Game.status.in_(finished_statuses),
                         (Game.home_team_id == team_id_for_b2b) | (Game.away_team_id == team_id_for_b2b),
                     ).limit(1)
                 )
                 prev_gid = prev_game.scalar_one_or_none()
+                if prev_gid is None:
+                    # No same-day Final — check yesterday
+                    day_before = tonight.game_date - timedelta(days=1)
+                    prev_game2 = await db.execute(
+                        select(Game.id).where(
+                            Game.game_date == day_before,
+                            (Game.home_team_id == team_id_for_b2b) | (Game.away_team_id == team_id_for_b2b),
+                        ).limit(1)
+                    )
+                    prev_gid = prev_game2.scalar_one_or_none()
                 if prev_gid:
-                    # Check if the player actually played (had >0 minutes)
                     played = await db.execute(
                         select(PlayerGameLog.id).where(
                             PlayerGameLog.game_id == prev_gid,

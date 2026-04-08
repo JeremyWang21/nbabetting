@@ -166,22 +166,35 @@ async def get_full_boxscore(game_id: int, db: AsyncSession = Depends(get_db)):
         if game.away_team_id in score_by_team:
             away_score = score_by_team[game.away_team_id]
 
-    # B2B check: did each team play in a DIFFERENT Final game on the same date
-    # or the day before? This handles cases where late-night games and early
-    # games share the same calendar date in the DB.
-    yesterday = game.game_date - timedelta(days=1)
+    # B2B check: did each team play a Final game earlier today (same date,
+    # different game) or yesterday? Prefer same-day Finals when they exist,
+    # else fall back to yesterday.
     finished_statuses = ["Final", "Final/OT", "Final/2OT", "Final/3OT"]
-    b2b_result = await db.execute(
+    same_day_result = await db.execute(
         select(Game.home_team_id, Game.away_team_id).where(
-            Game.game_date.in_([yesterday, game.game_date]),
+            Game.game_date == game.game_date,
             Game.id != game.id,
             Game.status.in_(finished_statuses),
         )
     )
-    yesterday_teams: set[int] = set()
-    for row in b2b_result:
-        yesterday_teams.add(row.home_team_id)
-        yesterday_teams.add(row.away_team_id)
+    same_day_teams: set[int] = set()
+    for row in same_day_result:
+        same_day_teams.add(row.home_team_id)
+        same_day_teams.add(row.away_team_id)
+
+    if same_day_teams:
+        yesterday_teams = same_day_teams
+    else:
+        yesterday = game.game_date - timedelta(days=1)
+        yest_result = await db.execute(
+            select(Game.home_team_id, Game.away_team_id).where(
+                Game.game_date == yesterday,
+            )
+        )
+        yesterday_teams = set()
+        for row in yest_result:
+            yesterday_teams.add(row.home_team_id)
+            yesterday_teams.add(row.away_team_id)
 
     def pct(made, att):
         if made is None or att is None or att == 0:
@@ -304,21 +317,31 @@ async def get_player_boxscore(game_id: int, player_id: int, db: AsyncSession = D
         home_score = score_map.get(game.home_team_id) or home_score
         away_score = score_map.get(game.away_team_id) or away_score
 
-    # B2B: check if each team played in a different Final game same day or day before
-    yesterday = game.game_date - timedelta(days=1)
+    # B2B: same logic as full-boxscore — prefer same-day Finals, else yesterday
     finished_statuses = ["Final", "Final/OT", "Final/2OT", "Final/3OT"]
-    b2b_result = await db.execute(
-        select(Game.home_team_id, Game.away_team_id)
-        .where(
-            Game.game_date.in_([yesterday, game.game_date]),
+    same_day_result = await db.execute(
+        select(Game.home_team_id, Game.away_team_id).where(
+            Game.game_date == game.game_date,
             Game.id != game.id,
             Game.status.in_(finished_statuses),
         )
     )
-    yesterday_teams: set[int] = set()
-    for row in b2b_result:
-        yesterday_teams.add(row.home_team_id)
-        yesterday_teams.add(row.away_team_id)
+    same_day_teams: set[int] = set()
+    for row in same_day_result:
+        same_day_teams.add(row.home_team_id)
+        same_day_teams.add(row.away_team_id)
+
+    if same_day_teams:
+        yesterday_teams = same_day_teams
+    else:
+        yesterday = game.game_date - timedelta(days=1)
+        yest_result = await db.execute(
+            select(Game.home_team_id, Game.away_team_id).where(Game.game_date == yesterday)
+        )
+        yesterday_teams = set()
+        for row in yest_result:
+            yesterday_teams.add(row.home_team_id)
+            yesterday_teams.add(row.away_team_id)
 
     def pct(made, att):
         if made is None or att is None or att == 0:

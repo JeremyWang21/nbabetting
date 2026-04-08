@@ -126,9 +126,8 @@ async def get_player_chart_data(
 
     avg = round(sum(values) / len(values), 1) if values else None
 
-    # B2B: did the player's team play the day before their upcoming game?
-    # Must use game_id to get the correct game date — otherwise when showing tomorrow's
-    # games, today_et()-1 gives the wrong reference date.
+    # B2B: did this specific player actually play the day before?
+    # Team played yesterday AND player had >0 minutes in that game.
     b2b = False
     if game_id and player:
         tonight = await db.get(Game, game_id)
@@ -139,17 +138,27 @@ async def get_player_chart_data(
             elif tonight.away_team_id == player.team_id:
                 team_id_for_b2b = player.team_id
             else:
-                # stale team_id — can't determine reliably, skip B2B
                 team_id_for_b2b = None
 
             if team_id_for_b2b:
                 day_before = tonight.game_date - timedelta(days=1)
-                b2b_result = await db.execute(
+                # Find yesterday's game for this team
+                yesterday_game = await db.execute(
                     select(Game.id).where(
                         Game.game_date == day_before,
                         (Game.home_team_id == team_id_for_b2b) | (Game.away_team_id == team_id_for_b2b),
                     ).limit(1)
                 )
-                b2b = b2b_result.scalar_one_or_none() is not None
+                yesterday_gid = yesterday_game.scalar_one_or_none()
+                if yesterday_gid:
+                    # Check if the player actually played (had >0 minutes)
+                    played = await db.execute(
+                        select(PlayerGameLog.id).where(
+                            PlayerGameLog.game_id == yesterday_gid,
+                            PlayerGameLog.player_id == player_id,
+                            PlayerGameLog.minutes > 0,
+                        ).limit(1)
+                    )
+                    b2b = played.scalar_one_or_none() is not None
 
     return {"labels": labels, "values": values, "minutes": minutes_list, "game_ids": game_ids, "avg": avg, "field": field, "market": market, "b2b": b2b}

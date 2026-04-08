@@ -34,6 +34,7 @@ async def ingest_roster_updates() -> None:
     await _sync_teams()
     await _sync_players()
     await _sync_positions()
+    await _fix_team_ids_from_game_logs()
     logger.info("ingest_roster_updates: done")
 
 
@@ -191,3 +192,87 @@ async def _sync_positions() -> None:
             updated += 1
         await session.commit()
     logger.info("_sync_positions: updated %d players", updated)
+
+
+async def _fix_team_ids_from_game_logs() -> None:
+    """
+    Fix stale team_id using recent game logs.
+
+    CommonAllPlayers is often wrong for recently traded players.
+    We use the nba_api PlayerIndex endpoint's TEAM_ID which is more
+    up-to-date, but as a final safety net we also check game logs:
+    if a player's most recent game was for a different team than
+    their stored team_id, update it.
+    """
+    from sqlalchemy import select, func, text
+    from sqlalchemy import update as sa_update
+
+    async with AsyncSessionLocal() as session:
+        from src.models.game import Game
+        from src.models.game_log import PlayerGameLog
+
+        # Use a raw SQL query for efficiency:
+        # For each player, find their most recent game log, get the game's
+        # home/away teams, and check if the player's team_id matches either.
+        # If not, the player was traded and we need to figure out which team.
+        result = await session.execute(text("""
+            WITH latest AS (
+                SELECT DISTINCT ON (pgl.player_id)
+                    pgl.player_id,
+                    g.home_team_id,
+                    g.away_team_id,
+                    g.game_date
+                FROM player_game_logs pgl
+                JOIN games g ON pgl.game_id = g.id
+                ORDER BY pgl.player_id, g.game_date DESC
+            )
+            SELECT l.player_id, l.home_team_id, l.away_team_id, p.team_id
+            FROM latest l
+            JOIN players p ON l.player_id = p.id
+            WHERE p.team_id NOT IN (l.home_team_id, l.away_team_id)
+              AND p.team_id IS NOT NULL
+        """))
+        mismatches = result.all()
+
+        if not mismatches:
+            logger.info("_fix_team_ids_from_game_logs: all team_ids correct")
+            return
+
+        logger.warning("_fix_team_ids_from_game_logs: %d players with stale team_id", len(mismatches))
+
+        fixed = 0
+        for pid, home_tid, away_tid, current_tid in mismatches:
+            # Count how many game logs this player has with each team as home/away
+            # to figure out which side they're on
+            home_count = await session.execute(
+                select(func.count()).select_from(PlayerGameLog)
+                .join(Game, PlayerGameLog.game_id == Game.id)
+                .where(
+                    PlayerGameLog.player_id == pid,
+                    Game.home_team_id == home_tid,
+                )
+            )
+            away_count = await session.execute(
+                select(func.count()).select_from(PlayerGameLog)
+                .join(Game, PlayerGameLog.game_id == Game.id)
+                .where(
+                    PlayerGameLog.player_id == pid,
+                    Game.away_team_id == away_tid,
+                )
+            )
+            h_cnt = home_count.scalar() or 0
+            a_cnt = away_count.scalar() or 0
+            # The team with more games is likely the player's actual team
+            # (they play ~41 home and ~41 away, but after trade they'd have
+            # more games with new team as either home or away)
+            # Simpler: just pick whichever team they appeared with more recently
+            new_team_id = home_tid if h_cnt >= a_cnt else away_tid
+            await session.execute(
+                sa_update(Player).where(Player.id == pid).values(team_id=new_team_id)
+            )
+            player = await session.get(Player, pid)
+            logger.info("_fix_team_ids: %s: team %d → %d", player.full_name if player else pid, current_tid, new_team_id)
+            fixed += 1
+
+        await session.commit()
+    logger.info("_fix_team_ids_from_game_logs: fixed %d players", fixed)

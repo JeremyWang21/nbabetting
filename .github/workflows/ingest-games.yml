@@ -42,17 +42,27 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
         run: |
           python -c "
-          import asyncio
+          import asyncio, traceback
           from datetime import timedelta
           from sqlalchemy import select
-          from src.ingestion.nba_stats_ingester import ingest_todays_games, _ingest_date_schedule
+          from src.ingestion.nba_stats_ingester import ingest_todays_games, _ingest_date_schedule, repair_game_dates
           from src.ingestion.roster_ingester import ingest_roster_updates
           from src.db.session import AsyncSessionLocal
           from src.models.game import Game
           from src.utils.date_utils import today_et
 
+          async def safe(name, coro):
+              try:
+                  await coro
+                  print(f'[OK] {name}')
+              except Exception:
+                  print(f'[FAIL] {name}')
+                  traceback.print_exc()
+
           async def run():
-              await ingest_todays_games()
+              # Always repair dates and sync scores
+              await safe('repair_game_dates', repair_game_dates())
+              await safe('ingest_todays_games', ingest_todays_games())
 
               # If all today's games are final, sync rosters and pre-seed tomorrow
               today = today_et()
@@ -62,11 +72,8 @@ jobs:
               finished = {'final', 'final/ot', 'final/2ot', 'final/3ot'}
               if statuses and all(st in finished for st in statuses):
                   print('All games final — syncing rosters and pre-seeding tomorrow')
-                  await ingest_roster_updates()
-                  try:
-                      await _ingest_date_schedule(today + timedelta(days=1))
-                  except Exception as e:
-                      print(f'Tomorrow schedule failed: {e}')
+                  await safe('ingest_roster_updates', ingest_roster_updates())
+                  await safe('_ingest_date_schedule tomorrow', _ingest_date_schedule(today + timedelta(days=1)))
 
           asyncio.run(run())
           "
@@ -75,4 +82,4 @@ jobs:
         run: |
           curl -s -X DELETE \
             -H "x-admin-secret: ${{ secrets.ADMIN_SECRET }}" \
-            "https://jprops.xyz/api/v1/admin/cache?pattern=games:*"
+            "https://jprops.xyz/api/v1/admin/cache?pattern=*"

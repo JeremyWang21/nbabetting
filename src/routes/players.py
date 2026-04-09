@@ -168,7 +168,9 @@ async def get_player_chart_data(
                         select(PlayerGameLog.id).where(
                             PlayerGameLog.game_id == prev_gid,
                             PlayerGameLog.player_id == player_id,
-                            PlayerGameLog.minutes > 0,
+                            PlayerGameLog.minutes.is_not(None),
+                            PlayerGameLog.minutes != "0",
+                            PlayerGameLog.minutes != "",
                         ).limit(1)
                     )
                     b2b = played.scalar_one_or_none() is not None

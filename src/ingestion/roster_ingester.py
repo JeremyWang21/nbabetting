@@ -132,6 +132,18 @@ async def _sync_players() -> None:
 
             is_active = str(p.get("ROSTERSTATUS", "1")) == "1"
 
+            # Only update team_id if the API gives a real team (not 0/None).
+            # CommonAllPlayers often returns TEAM_ID=0 for active players,
+            # which would clobber a correct team_id we derived from game logs.
+            update_set = {
+                "full_name": full_name,
+                "first_name": first_name,
+                "last_name": last_name,
+                "is_active": is_active,
+            }
+            if internal_team_id is not None:
+                update_set["team_id"] = internal_team_id
+
             stmt = (
                 pg_insert(Player)
                 .values(
@@ -144,13 +156,7 @@ async def _sync_players() -> None:
                 )
                 .on_conflict_do_update(
                     index_elements=["nba_id"],
-                    set_={
-                        "full_name": full_name,
-                        "first_name": first_name,
-                        "last_name": last_name,
-                        "team_id": internal_team_id,
-                        "is_active": is_active,
-                    },
+                    set_=update_set,
                 )
             )
             await session.execute(stmt)
@@ -229,8 +235,8 @@ async def _fix_team_ids_from_game_logs() -> None:
             SELECT l.player_id, l.home_team_id, l.away_team_id, p.team_id
             FROM latest l
             JOIN players p ON l.player_id = p.id
-            WHERE p.team_id NOT IN (l.home_team_id, l.away_team_id)
-              AND p.team_id IS NOT NULL
+            WHERE p.team_id IS NULL
+               OR p.team_id NOT IN (l.home_team_id, l.away_team_id)
         """))
         mismatches = result.all()
 
